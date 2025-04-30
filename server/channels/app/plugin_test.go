@@ -479,7 +479,7 @@ func TestPluginSync(t *testing.T) {
 		{
 			"local",
 			func(cfg *model.Config) {
-				cfg.FileSettings.DriverName = model.NewString(model.ImageDriverLocal)
+				cfg.FileSettings.DriverName = model.NewPointer(model.ImageDriverLocal)
 			},
 		},
 		{
@@ -496,14 +496,14 @@ func TestPluginSync(t *testing.T) {
 				}
 
 				s3Endpoint := fmt.Sprintf("%s:%s", s3Host, s3Port)
-				cfg.FileSettings.DriverName = model.NewString(model.ImageDriverS3)
-				cfg.FileSettings.AmazonS3AccessKeyId = model.NewString(model.MinioAccessKey)
-				cfg.FileSettings.AmazonS3SecretAccessKey = model.NewString(model.MinioSecretKey)
-				cfg.FileSettings.AmazonS3Bucket = model.NewString(model.MinioBucket)
-				cfg.FileSettings.AmazonS3PathPrefix = model.NewString("")
-				cfg.FileSettings.AmazonS3Endpoint = model.NewString(s3Endpoint)
-				cfg.FileSettings.AmazonS3Region = model.NewString("")
-				cfg.FileSettings.AmazonS3SSL = model.NewBool(false)
+				cfg.FileSettings.DriverName = model.NewPointer(model.ImageDriverS3)
+				cfg.FileSettings.AmazonS3AccessKeyId = model.NewPointer(model.MinioAccessKey)
+				cfg.FileSettings.AmazonS3SecretAccessKey = model.NewPointer(model.MinioSecretKey)
+				cfg.FileSettings.AmazonS3Bucket = model.NewPointer(model.MinioBucket)
+				cfg.FileSettings.AmazonS3PathPrefix = model.NewPointer("")
+				cfg.FileSettings.AmazonS3Endpoint = model.NewPointer(s3Endpoint)
+				cfg.FileSettings.AmazonS3Region = model.NewPointer("")
+				cfg.FileSettings.AmazonS3SSL = model.NewPointer(false)
 			},
 		},
 	}
@@ -754,7 +754,7 @@ func TestPluginPanicLogs(t *testing.T) {
 			Message:   "message_",
 			CreateAt:  model.GetMillis() - 10000,
 		}
-		_, err := th.App.CreatePost(th.Context, post, th.BasicChannel, false, true)
+		_, err := th.App.CreatePost(th.Context, post, th.BasicChannel, model.CreatePostFlags{SetOnline: true})
 		assert.Nil(t, err)
 
 		th.TestLogger.Flush()
@@ -1355,7 +1355,8 @@ func TestProcessPrepackagedPlugins(t *testing.T) {
 		require.Len(t, transitionalPlugins, 1)
 		expectPrepackagedPlugin(t, "testplugin", "0.0.1", transitionalPlugins[0])
 
-		th.App.ch.RemovePlugin("testplugin")
+		appErr := th.App.ch.RemovePlugin("testplugin")
+		require.Nil(t, appErr)
 
 		pluginStatus, err := env.Statuses()
 		require.NoError(t, err)
