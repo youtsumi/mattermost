@@ -1365,21 +1365,32 @@ export function removePrefixFromLocalStorage(prefix: string) {
 }
 
 export function copyToClipboard(data: string) {
-    // Attempt to use the newer clipboard API when possible
-    const clipboard = navigator.clipboard;
-    if (clipboard) {
-        clipboard.writeText(data).then(
+    const isSecureContext = window.isSecureContext;
+
+    // Attempt clipboard API when HTTPS or localhost
+    if (isSecureContext && navigator.clipboard) {
+        navigator.clipboard.writeText(data).then(
             () => {
                 /* clipboard successfully set */
                 return;
+            },
+            () => {
+                /* clipboard write failed, falls back to workaround below */
+                fallbackCopyToClipboard(data);
             }
-            /* clipboard write failed, falls back to workaround below */
         );
+    } else {
+        // Fallback for when HTTP or Clipboard API is not supported
+        fallbackCopyToClipboard(data);
     }
+}
+
+function fallbackCopyToClipboard(text: string): void {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
 
     // creates a tiny temporary text area to copy text out of
     // see https://stackoverflow.com/a/30810322/591374 for details
-    const textArea = document.createElement('textarea');
     textArea.style.position = 'fixed';
     textArea.style.top = '0';
     textArea.style.left = '0';
@@ -1390,10 +1401,16 @@ export function copyToClipboard(data: string) {
     textArea.style.outline = 'none';
     textArea.style.boxShadow = 'none';
     textArea.style.background = 'transparent';
-    textArea.value = data;
+
     document.body.appendChild(textArea);
     textArea.select();
-    document.execCommand('copy');
+
+    try {
+        document.execCommand('copy');
+    } catch (err) {
+        console.error('Fallback: Failed to copy text: ', err);
+    }
+
     document.body.removeChild(textArea);
 }
 
