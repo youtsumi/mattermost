@@ -6,8 +6,11 @@ package audit
 import (
 	"fmt"
 
+	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/shared/mlog"
 )
+
+const DefMaxQueueSize = 1000
 
 type Audit struct {
 	logger *mlog.Logger
@@ -30,14 +33,14 @@ func (a *Audit) Init(maxQueueSize int) {
 }
 
 // LogRecord emits an audit record with complete info.
-func (a *Audit) LogRecord(level mlog.Level, rec Record) {
+func (a *Audit) LogRecord(level mlog.Level, rec model.AuditRecord) {
 	flds := []mlog.Field{
-		mlog.String(KeyEventName, rec.EventName),
-		mlog.String(KeyStatus, rec.Status),
-		mlog.Any(KeyActor, rec.Actor),
-		mlog.Any(KeyEvent, rec.EventData),
-		mlog.Any(KeyMeta, rec.Meta),
-		mlog.Any(KeyError, rec.Error),
+		mlog.String(model.AuditKeyEventName, rec.EventName),
+		mlog.String(model.AuditKeyStatus, rec.Status),
+		mlog.Any(model.AuditKeyActor, rec.Actor),
+		mlog.Any(model.AuditKeyEvent, rec.EventData),
+		mlog.Any(model.AuditKeyMeta, rec.Meta),
+		mlog.Any(model.AuditKeyError, rec.Error),
 	}
 
 	a.logger.Log(level, "", flds...)
@@ -70,7 +73,7 @@ func (a *Audit) onQueueFull(rec *mlog.LogRec, maxQueueSize int) bool {
 	if a.OnQueueFull != nil {
 		return a.OnQueueFull("main", maxQueueSize)
 	}
-	mlog.Error("Audit logging queue full, dropping record.", mlog.Int("queueSize", maxQueueSize))
+	mlog.Error("Audit logging queue full, dropping record.", mlog.Int("queue_size", maxQueueSize))
 	return true
 }
 
@@ -78,7 +81,7 @@ func (a *Audit) onTargetQueueFull(target mlog.Target, rec *mlog.LogRec, maxQueue
 	if a.OnQueueFull != nil {
 		return a.OnQueueFull(fmt.Sprintf("%v", target), maxQueueSize)
 	}
-	mlog.Error("Audit logging queue full for target, dropping record.", mlog.Any("target", target), mlog.Int("queueSize", maxQueueSize))
+	mlog.Error("Audit logging queue full for target, dropping record.", mlog.Any("target", target), mlog.Int("queue_size", maxQueueSize))
 	return true
 }
 

@@ -25,6 +25,15 @@ import (
 	"github.com/mattermost/mattermost/server/v8/channels/utils"
 )
 
+// tokenDigest returns a stable, non-reversible identifier for a token, usable for correlation.
+func tokenDigest(token string) string {
+	if token == "" {
+		return "<none>"
+	}
+
+	return utils.HashSha256(token)[:16]
+}
+
 func GetHandlerName(h func(*Context, http.ResponseWriter, *http.Request)) string {
 	handlerName := runtime.FuncForPC(reflect.ValueOf(h).Pointer()).Name()
 	pos := strings.LastIndex(handlerName, ".")
@@ -48,9 +57,15 @@ func (w *Web) NewHandler(h func(*Context, http.ResponseWriter, *http.Request)) h
 }
 
 func (w *Web) NewStaticHandler(h func(*Context, http.ResponseWriter, *http.Request)) http.Handler {
-	// Determine the CSP SHA directive needed for subpath support, if any. This value is fixed
-	// on server start and intentionally requires a restart to take effect.
-	subpath, _ := utils.GetSubpathFromConfig(w.srv.Config())
+	// Determine the CSP SHA directives needed for the inline scripts injected into root.html.
+	// These values are fixed on server start and intentionally require a restart to take effect.
+	cfg := w.srv.Config()
+	subpath, _ := utils.GetSubpathFromConfig(cfg)
+
+	enableConcurrentReact := false
+	if cfg.FeatureFlags != nil {
+		enableConcurrentReact = cfg.FeatureFlags.EnableConcurrentReact
+	}
 
 	return &Handler{
 		Srv:            w.srv,
@@ -61,7 +76,7 @@ func (w *Web) NewStaticHandler(h func(*Context, http.ResponseWriter, *http.Reque
 		RequireMfa:     false,
 		IsStatic:       true,
 
-		cspShaDirective: utils.GetSubpathScriptHash(subpath),
+		cspShaDirective: utils.GetStaticScriptHashes(subpath, enableConcurrentReact),
 	}
 }
 
@@ -98,7 +113,7 @@ func generateDevCSP(c Context) string {
 
 	// Add supported flags for debugging during development, even if not on a dev build.
 	if *c.App.Config().ServiceSettings.DeveloperFlags != "" {
-		for _, devFlagKVStr := range strings.Split(*c.App.Config().ServiceSettings.DeveloperFlags, ",") {
+		for devFlagKVStr := range strings.SplitSeq(*c.App.Config().ServiceSettings.DeveloperFlags, ",") {
 			devFlagKVSplit := strings.SplitN(devFlagKVStr, "=", 2)
 			if len(devFlagKVSplit) != 2 {
 				c.Logger.Warn("Unable to parse developer flag", mlog.String("developer_flag", devFlagKVStr))
@@ -161,9 +176,12 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			mlog.String("url", r.URL.Path),
 			mlog.String("request_id", requestID),
 		}
-		// if there is a session then include the user_id
-		if c.AppContext.Session() != nil {
+		// if there is a valid session and userID then include the user_id
+		if c.AppContext.Session() != nil && c.AppContext.Session().UserId != "" {
 			responseLogFields = append(responseLogFields, mlog.String("user_id", c.AppContext.Session().UserId))
+			if c.AppContext.Session().IsUserAccessToken() {
+				responseLogFields = append(responseLogFields, mlog.String("user_access_token_id", c.AppContext.Session().Props[model.SessionPropUserAccessTokenId]))
+			}
 		}
 
 		statusCode := strconv.Itoa(w.(*responseWriterWrapper).StatusCode())
@@ -190,6 +208,10 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Header.Get("Accept-Language"),
 		t,
 	)
+
+	if connectionId := r.Header.Get(model.ConnectionId); connectionId != "" {
+		c.AppContext = c.AppContext.WithConnectionId(connectionId)
+	}
 
 	c.Params = ParamsFromRequest(r)
 	c.Logger = c.App.Log()
@@ -238,7 +260,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Set content security policy. This is also specified in the root.html of the webapp in a meta tag.
 		w.Header().Set("Content-Security-Policy", fmt.Sprintf(
-			"frame-ancestors 'self' %s; script-src 'self' cdn.rudderlabs.com%s%s",
+			"frame-ancestors 'self' %s; script-src 'self'%s%s",
 			*c.App.Config().ServiceSettings.FrameAncestors,
 			h.cspShaDirective,
 			devCSP,
@@ -258,33 +280,38 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		session, err := c.App.GetSession(token)
 
 		if err != nil {
-			c.Logger.Info("Invalid session", mlog.Err(err))
+			c.Logger.Info("Invalid session", mlog.String("error", strings.ReplaceAll(err.Error(), token, tokenDigest(token))))
 			if err.StatusCode == http.StatusInternalServerError {
 				c.Err = err
 			} else if h.RequireSession {
 				c.RemoveSessionCookie(w, r)
-				c.Err = model.NewAppError("ServeHTTP", "api.context.session_expired.app_error", nil, "token="+token, http.StatusUnauthorized)
+				c.Err = model.NewAppError("ServeHTTP", "api.context.session_expired.app_error", nil, "token_sha256="+tokenDigest(token), http.StatusUnauthorized)
 			}
 		} else if !session.IsOAuth && tokenLocation == app.TokenLocationQueryString {
-			c.Err = model.NewAppError("ServeHTTP", "api.context.token_provided.app_error", nil, "token="+token, http.StatusUnauthorized)
+			c.Err = model.NewAppError("ServeHTTP", "api.context.token_provided.app_error", nil, "token_sha256="+tokenDigest(token), http.StatusUnauthorized)
 		} else {
 			c.AppContext = c.AppContext.WithSession(session)
 		}
 
 		// Rate limit by UserID
 		if c.App.Srv().RateLimiter != nil {
-			rateLimitExceeded = c.App.Srv().RateLimiter.UserIdRateLimit(c.AppContext.Session().UserId, w)
+			rateLimitExceeded = c.App.Srv().RateLimiter.UserIdRateLimit(r.Context(), c.AppContext.Session().UserId, w)
 			if rateLimitExceeded {
 				return
 			}
 		}
 
-		h.checkCSRFToken(c, r, token, tokenLocation, session)
+		csrfChecked, csrfPassed := h.checkCSRFToken(c, r, tokenLocation, session)
+		if csrfChecked && !csrfPassed {
+			c.AppContext = c.AppContext.WithSession(&model.Session{})
+			c.RemoveSessionCookie(w, r)
+			c.Err = model.NewAppError("ServeHTTP", "api.context.session_expired.app_error", nil, "token_sha256="+tokenDigest(token)+" Appears to be a CSRF attempt", http.StatusUnauthorized)
+		}
 	} else if token != "" && c.App.Channels().License().IsCloud() && tokenLocation == app.TokenLocationCloudHeader {
 		// Check to see if this provided token matches our CWS Token
 		session, err := c.App.GetCloudSession(token)
 		if err != nil {
-			c.Logger.Warn("Invalid CWS token", mlog.Err(err))
+			c.Logger.Warn("Invalid CWS token", mlog.String("error", strings.ReplaceAll(err.Error(), token, tokenDigest(token))))
 			c.Err = err
 		} else {
 			c.AppContext = c.AppContext.WithSession(session)
@@ -298,7 +325,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// Check the token is correct for the remote cluster id.
 			session, err := c.App.GetRemoteClusterSession(token, remoteId)
 			if err != nil {
-				c.Logger.Warn("Invalid remote cluster token", mlog.Err(err))
+				c.Logger.Warn("Invalid remote cluster token", mlog.String("error", strings.ReplaceAll(err.Error(), token, tokenDigest(token))))
 				c.Err = err
 			} else {
 				c.AppContext = c.AppContext.WithSession(session)
@@ -306,21 +333,26 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	c.Logger = c.App.Log().With(
+	loggerFields := []mlog.Field{
 		mlog.String("path", c.AppContext.Path()),
 		mlog.String("request_id", c.AppContext.RequestId()),
 		mlog.String("ip_addr", c.AppContext.IPAddress()),
 		mlog.String("user_id", c.AppContext.Session().UserId),
 		mlog.String("method", r.Method),
-	)
+	}
+	if c.AppContext.Session().IsUserAccessToken() {
+		loggerFields = append(loggerFields, mlog.String("user_access_token_id", c.AppContext.Session().Props[model.SessionPropUserAccessTokenId]))
+	}
+	c.Logger = c.App.Log().With(loggerFields...)
 	c.AppContext = c.AppContext.WithLogger(c.Logger)
+	c.App.ProcessSessionAttributesRequest(c.AppContext, r)
 
 	if c.Err == nil && h.RequireSession {
 		c.SessionRequired()
 	}
 
 	if c.Err == nil && h.RequireMfa {
-		c.MfaRequired()
+		c.MfaRequired(r.Method)
 	}
 
 	if c.Err == nil && h.DisableWhenBusy && c.App.Srv().Platform().Busy.IsBusy() {
@@ -388,6 +420,19 @@ func (h Handler) handleContextError(c *Context, w http.ResponseWriter, r *http.R
 		c.Err = newErr
 	}
 
+	// Detect and fix AppError with missing StatusCode to prevent panics
+	if c.Err.StatusCode == 0 {
+		c.Logger.Error("AppError with zero StatusCode detected",
+			mlog.String("error_id", c.Err.Id),
+			mlog.String("error_message", c.Err.Message),
+			mlog.String("error_where", c.Err.Where),
+			mlog.String("request_path", r.URL.Path),
+			mlog.String("request_method", r.Method),
+			mlog.String("detailed_error", c.Err.DetailedError),
+		)
+		c.Err.StatusCode = http.StatusInternalServerError
+	}
+
 	c.Err.RequestId = c.AppContext.RequestId()
 	c.LogErrorByCode(c.Err)
 	// The locale translation needs to happen after we have logged it.
@@ -402,10 +447,12 @@ func (h Handler) handleContextError(c *Context, w http.ResponseWriter, r *http.R
 	}
 
 	// Sanitize all 5xx error messages in hardened mode
-	if *c.App.Config().ServiceSettings.ExperimentalEnableHardenedMode && c.Err.StatusCode >= 500 {
+	if *c.App.Config().ServiceSettings.EnableHardenedMode && c.Err.StatusCode >= 500 {
 		c.Err.Id = ""
 		c.Err.Message = "Internal Server Error"
 		c.Err.WipeDetailed()
+		// Props is always exposed to clients, so scrub it along with the rest of the sanitized 5xx.
+		c.Err.Props = nil
 		c.Err.StatusCode = 500
 		c.Err.Where = ""
 	}
@@ -469,7 +516,7 @@ func GetOriginClient(r *http.Request) OriginClient {
 
 // checkCSRFToken performs a CSRF check on the provided request with the given CSRF token. Returns whether
 // a CSRF check occurred and whether it succeeded.
-func (h *Handler) checkCSRFToken(c *Context, r *http.Request, token string, tokenLocation app.TokenLocation, session *model.Session) (checked bool, passed bool) {
+func (h *Handler) checkCSRFToken(c *Context, r *http.Request, tokenLocation app.TokenLocation, session *model.Session) (checked bool, passed bool) {
 	csrfCheckNeeded := session != nil && c.Err == nil && tokenLocation == app.TokenLocationCookie && !h.TrustRequester && r.Method != "GET"
 	csrfCheckPassed := false
 
@@ -495,11 +542,6 @@ func (h *Handler) checkCSRFToken(c *Context, r *http.Request, token string, toke
 				c.Logger.Debug(csrfErrorMessage, fields...)
 				csrfCheckPassed = true
 			}
-		}
-
-		if !csrfCheckPassed {
-			c.AppContext = c.AppContext.WithSession(&model.Session{})
-			c.Err = model.NewAppError("ServeHTTP", "api.context.session_expired.app_error", nil, "token="+token+" Appears to be a CSRF attempt", http.StatusUnauthorized)
 		}
 	}
 

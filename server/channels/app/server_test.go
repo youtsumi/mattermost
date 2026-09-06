@@ -32,10 +32,6 @@ import (
 	"github.com/mattermost/mattermost/server/v8/platform/shared/filestore"
 )
 
-func newServer(t *testing.T) (*Server, error) {
-	return newServerWithConfig(t, func(_ *model.Config) {})
-}
-
 func newServerWithConfig(t *testing.T, f func(cfg *model.Config)) (*Server, error) {
 	configStore, err := config.NewMemoryStore()
 	require.NoError(t, err)
@@ -54,6 +50,7 @@ func newServerWithConfig(t *testing.T, f func(cfg *model.Config)) (*Server, erro
 }
 
 func TestStartServerSuccess(t *testing.T) {
+	mainHelper.Parallel(t)
 	s, err := newServerWithConfig(t, func(cfg *model.Config) {
 		*cfg.ServiceSettings.ListenAddress = "localhost:0"
 	})
@@ -70,17 +67,21 @@ func TestStartServerSuccess(t *testing.T) {
 }
 
 func TestStartServerPortUnavailable(t *testing.T) {
-	// Listen on the next available port
-	listener, err := net.Listen("tcp", "localhost:0")
+	mainHelper.Parallel(t)
+	// Pin to IPv4 so the blocked port exactly matches the address Start() will bind.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+
+	_, port, err := net.SplitHostPort(listener.Addr().String())
 	require.NoError(t, err)
 
-	s, err := newServer(t)
-	require.NoError(t, err)
+	blockedAddr := net.JoinHostPort("127.0.0.1", port)
 
-	// Attempt to listen on the port used above.
-	s.platform.UpdateConfig(func(cfg *model.Config) {
-		*cfg.ServiceSettings.ListenAddress = listener.Addr().String()
+	s, err := newServerWithConfig(t, func(cfg *model.Config) {
+		*cfg.ServiceSettings.ListenAddress = blockedAddr
 	})
+	require.NoError(t, err)
 
 	serverErr := s.Start()
 	s.Shutdown()
@@ -88,6 +89,7 @@ func TestStartServerPortUnavailable(t *testing.T) {
 }
 
 func TestStartServerNoS3Bucket(t *testing.T) {
+	mainHelper.Parallel(t)
 	s3Host := os.Getenv("CI_MINIO_HOST")
 	if s3Host == "" {
 		s3Host = "localhost"
@@ -107,11 +109,11 @@ func TestStartServerNoS3Bucket(t *testing.T) {
 		DriverName:              model.NewPointer(model.ImageDriverS3),
 		AmazonS3AccessKeyId:     model.NewPointer(model.MinioAccessKey),
 		AmazonS3SecretAccessKey: model.NewPointer(model.MinioSecretKey),
-		AmazonS3Bucket:          model.NewPointer("nosuchbucket"),
-		AmazonS3Endpoint:        model.NewPointer(s3Endpoint),
-		AmazonS3Region:          model.NewPointer(""),
-		AmazonS3PathPrefix:      model.NewPointer(""),
-		AmazonS3SSL:             model.NewPointer(false),
+		AmazonS3Bucket:          new("nosuchbucket"),
+		AmazonS3Endpoint:        new(s3Endpoint),
+		AmazonS3Region:          new(""),
+		AmazonS3PathPrefix:      new(""),
+		AmazonS3SSL:             new(false),
 	}
 	*cfg.ServiceSettings.ListenAddress = "localhost:0"
 	*cfg.AnnouncementSettings.AdminNoticesEnabled = false
@@ -140,6 +142,7 @@ func TestStartServerNoS3Bucket(t *testing.T) {
 }
 
 func TestStartServerTLSSuccess(t *testing.T) {
+	mainHelper.Parallel(t)
 	s, err := newServerWithConfig(t, func(cfg *model.Config) {
 		testDir, _ := fileutils.FindDir("tests")
 
@@ -165,6 +168,7 @@ func TestStartServerTLSSuccess(t *testing.T) {
 }
 
 func TestStartServerTLSVersion(t *testing.T) {
+	mainHelper.Parallel(t)
 	configStore, _ := config.NewMemoryStore()
 	store, _ := config.NewStoreFromBacking(configStore, nil, false)
 	cfg := store.Get()
@@ -205,7 +209,6 @@ func TestStartServerTLSVersion(t *testing.T) {
 	}
 
 	err = checkEndpoint(t, client, "https://localhost:"+strconv.Itoa(s.ListenAddr.Port)+"/")
-
 	if err != nil {
 		t.Errorf("Expected nil, got %s", err)
 	}
@@ -215,6 +218,7 @@ func TestStartServerTLSVersion(t *testing.T) {
 }
 
 func TestStartServerTLSOverwriteCipher(t *testing.T) {
+	mainHelper.Parallel(t)
 	s, err := newServerWithConfig(t, func(cfg *model.Config) {
 		testDir, _ := fileutils.FindDir("tests")
 
@@ -280,6 +284,7 @@ func checkEndpoint(t *testing.T, client *http.Client, url string) error {
 }
 
 func TestPanicLog(t *testing.T) {
+	mainHelper.Parallel(t)
 	// Creating a temp dir for log
 	tmpDir, err := os.MkdirTemp("", "mlog-test")
 	require.NoError(t, err, "cannot create tmp dir for log file")
@@ -292,9 +297,9 @@ func TestPanicLog(t *testing.T) {
 	logger, _ := mlog.NewLogger()
 
 	logSettings := model.NewLogSettings()
-	logSettings.EnableConsole = model.NewPointer(true)
-	logSettings.ConsoleJson = model.NewPointer(true)
-	logSettings.EnableFile = model.NewPointer(true)
+	logSettings.EnableConsole = new(true)
+	logSettings.ConsoleJson = new(true)
+	logSettings.EnableFile = new(true)
 	logSettings.FileLocation = &tmpDir
 	logSettings.FileLevel = &mlog.LvlInfo.Name
 
@@ -347,8 +352,8 @@ func TestPanicLog(t *testing.T) {
 	s.Shutdown()
 
 	// Checking whether panic was logged
-	var panicLogged = false
-	var infoLogged = false
+	panicLogged := false
+	infoLogged := false
 
 	logFile, err := os.Open(config.GetLogFileLocation(tmpDir))
 	require.NoError(t, err, "cannot open log file")
@@ -387,7 +392,8 @@ func TestSentry(t *testing.T) {
 	testDir, _ := fileutils.FindDir("tests")
 
 	setSentryDSN := func(t *testing.T, dsn *sentry.Dsn) {
-		os.Setenv("MM_SERVICEENVIRONMENT", model.ServiceEnvironmentTest)
+		// t.Setenv prevents t.Parallel — env var has no config equivalent
+		t.Setenv("MM_SERVICEENVIRONMENT", model.ServiceEnvironmentTest)
 
 		// Allow Playbooks to startup
 		oldBuildHash := model.BuildHash
@@ -396,7 +402,6 @@ func TestSentry(t *testing.T) {
 		oldSentryDSN := SentryDSN
 		SentryDSN = dsn.String()
 		t.Cleanup(func() {
-			os.Unsetenv("MM_SERVICEENVIRONMENT")
 			model.BuildHash = oldBuildHash
 			SentryDSN = oldSentryDSN
 		})
@@ -494,6 +499,7 @@ func TestSentry(t *testing.T) {
 }
 
 func TestCancelTaskSetsTaskToNil(t *testing.T) {
+	mainHelper.Parallel(t)
 	var taskMut sync.Mutex
 	task := model.CreateRecurringTaskFromNextIntervalTime("a test task", func() {}, 5*time.Minute)
 	require.NotNil(t, task)
@@ -503,8 +509,8 @@ func TestCancelTaskSetsTaskToNil(t *testing.T) {
 }
 
 func TestOriginChecker(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 
 	th.App.UpdateConfig(func(cfg *model.Config) {
 		*cfg.ServiceSettings.AllowCorsFrom = ""
@@ -558,5 +564,52 @@ func TestOriginChecker(t *testing.T) {
 		}
 		res := th.App.OriginChecker()(r)
 		require.Equalf(t, tc.Pass, res, "Test case (%d)", i)
+	}
+}
+
+func TestEmailBatchingSettingChanged(t *testing.T) {
+	t.Parallel()
+
+	cfg := func(enabled bool, interval int) *model.Config {
+		c := &model.Config{}
+		c.EmailSettings.EnableEmailBatching = model.NewPointer(enabled)
+		c.EmailSettings.EmailBatchingInterval = model.NewPointer(interval)
+		return c
+	}
+
+	tests := []struct {
+		name     string
+		oldCfg   *model.Config
+		newCfg   *model.Config
+		expected bool
+	}{
+		{name: "nil old config", oldCfg: nil, newCfg: cfg(true, 30), expected: true},
+		{name: "nil new config", oldCfg: cfg(true, 30), newCfg: nil, expected: true},
+		{name: "unchanged disabled", oldCfg: cfg(false, 30), newCfg: cfg(false, 30), expected: false},
+		{name: "unchanged enabled", oldCfg: cfg(true, 30), newCfg: cfg(true, 30), expected: false},
+		{name: "enabled", oldCfg: cfg(false, 30), newCfg: cfg(true, 30), expected: true},
+		{name: "disabled", oldCfg: cfg(true, 30), newCfg: cfg(false, 30), expected: true},
+		{name: "interval changed", oldCfg: cfg(true, 30), newCfg: cfg(true, 300), expected: true},
+		{
+			name: "push notification server change is ignored",
+			oldCfg: func() *model.Config {
+				c := cfg(false, 30)
+				c.EmailSettings.PushNotificationServer = model.NewPointer(model.MHPNSGlobal)
+				return c
+			}(),
+			newCfg: func() *model.Config {
+				c := cfg(false, 30)
+				c.EmailSettings.PushNotificationServer = model.NewPointer(model.GenericNotificationServer)
+				return c
+			}(),
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.expected, emailBatchingSettingChanged(tc.oldCfg, tc.newCfg))
+		})
 	}
 }

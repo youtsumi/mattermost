@@ -10,7 +10,7 @@
 // Stage: @prod
 // Group: @channels @messaging
 
-import * as TIMEOUTS from '../../../fixtures/timeouts';
+import * as TIMEOUTS from '@/fixtures/timeouts';
 
 describe('Permalink message edit', () => {
     let testTeam;
@@ -71,7 +71,7 @@ describe('Permalink message edit', () => {
 
             // # Find searchWord and verify edited post
             cy.uiGetSearchContainer().click();
-            cy.uiGetSearchBox().should('be.visible').first().type(searchWord).type('{enter}');
+            cy.uiGetSearchBox().should('be.visible').type(searchWord).type('{enter}');
             cy.get('.search-item__jump').first().click();
 
             // # Check if url include the permalink

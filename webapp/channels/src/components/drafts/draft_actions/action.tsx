@@ -4,7 +4,7 @@
 import classNames from 'classnames';
 import React from 'react';
 
-import WithTooltip from 'components/with_tooltip';
+import {WithTooltip} from '@mattermost/shared/components/tooltip';
 
 import './action.scss';
 
@@ -27,6 +27,7 @@ function Action({
         <div className='DraftAction'>
             <WithTooltip
                 title={tooltipText}
+                id={`draft_tooltip_${id}`}
             >
                 <button
                     className={classNames(
@@ -35,6 +36,7 @@ function Action({
                     )}
                     id={`draft_${icon}_${id}`}
                     onClick={onClick}
+                    aria-labelledby={`draft_tooltip_${id}`}
                 >
                     <i
                         className={classNames(

@@ -11,7 +11,6 @@ import (
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/shared/mlog"
 	"github.com/mattermost/mattermost/server/v8/channels/app"
-	"github.com/mattermost/mattermost/server/v8/channels/audit"
 	"github.com/mattermost/mattermost/server/v8/channels/web"
 )
 
@@ -49,12 +48,18 @@ func createEmoji(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, app.MaxEmojiFileSize)
 	if err := r.ParseMultipartForm(app.MaxEmojiFileSize); err != nil {
 		c.Err = model.NewAppError("createEmoji", "api.emoji.create.parse.app_error", nil, "", http.StatusBadRequest).Wrap(err)
 		return
 	}
 
-	auditRec := c.MakeAuditRecord("createEmoji", audit.Fail)
+	if imageFiles := r.MultipartForm.File["image"]; len(imageFiles) > 0 && imageFiles[0].Size > app.MaxEmojiFileSize {
+		c.Err = model.NewAppError("createEmoji", "api.emoji.create.too_large.app_error", nil, "", http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	auditRec := c.MakeAuditRecord(model.AuditEventCreateEmoji, model.AuditStatusFail)
 	defer c.LogAuditRec(auditRec)
 
 	// Allow any user with CREATE_EMOJIS permission at Team level to create emojis at system level
@@ -137,12 +142,12 @@ func deleteEmoji(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auditRec := c.MakeAuditRecord("deleteEmoji", audit.Fail)
+	auditRec := c.MakeAuditRecord(model.AuditEventDeleteEmoji, model.AuditStatusFail)
 	defer c.LogAuditRec(auditRec)
 
 	emoji, err := c.App.GetEmoji(c.AppContext, c.Params.EmojiId)
 	if err != nil {
-		audit.AddEventParameter(auditRec, "emoji_id", c.Params.EmojiId)
+		model.AddEventParameterToAuditRec(auditRec, "emoji_id", c.Params.EmojiId)
 		c.Err = err
 		return
 	}

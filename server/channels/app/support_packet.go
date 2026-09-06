@@ -5,12 +5,13 @@ package app
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"slices"
 	"sync"
 
+	"github.com/goccy/go-yaml"
 	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
-	"gopkg.in/yaml.v3"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
@@ -19,12 +20,13 @@ import (
 )
 
 func (a *App) GenerateSupportPacket(rctx request.CTX, options *model.SupportPacketOptions) []model.FileData {
-	functions := map[string]func(c request.CTX) (*model.FileData, error){
+	functions := map[string]func(rctx request.CTX) (*model.FileData, error){
 		"metadata":    a.getSupportPacketMetadata,
 		"stats":       a.getSupportPacketStats,
 		"jobs":        a.getSupportPacketJobList,
 		"permissions": a.getSupportPacketPermissionsInfo,
 		"plugins":     a.getPluginsFile,
+		"schema":      a.getSupportPacketDatabaseSchema,
 	}
 
 	var (
@@ -36,10 +38,7 @@ func (a *App) GenerateSupportPacket(rctx request.CTX, options *model.SupportPack
 		mut       sync.Mutex // Protects warnings and fileDatas
 	)
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		for name, fn := range functions {
 			fileData, err := fn(rctx)
 			mut.Lock()
@@ -63,18 +62,28 @@ func (a *App) GenerateSupportPacket(rctx request.CTX, options *model.SupportPack
 		if err != nil {
 			warnings = multierror.Append(warnings, err)
 		}
-		if files != nil {
-			fileDatas = append(fileDatas, files...)
+
+		if fileDatas != nil {
+			if cluster := a.Cluster(); cluster != nil && *a.Config().ClusterSettings.Enable {
+				hostname := cluster.GetMyClusterInfo().Hostname
+				for _, file := range files {
+					// When running in a cluster, the files are generated with the cluster node name as the directory, e.g. 7917b92f9e4c/mattermost.log
+					fileDatas = append(fileDatas, model.FileData{
+						Filename: filepath.Join(hostname, file.Filename),
+						Body:     file.Body,
+					})
+				}
+			} else {
+				// When running in standalone mode, all files are generated with the same directory name, e.g. mattermost.log.
+				fileDatas = append(fileDatas, files...)
+			}
 		}
 		mut.Unlock()
-	}()
+	})
 
 	// Run the cluster generation in a separate goroutine as CPU profile generation and file upload can take a long time
 	if cluster := a.Cluster(); cluster != nil && *a.Config().ClusterSettings.Enable {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			files, err := cluster.GenerateSupportPacket(rctx, options)
 			mut.Lock()
 			if err != nil {
@@ -86,7 +95,7 @@ func (a *App) GenerateSupportPacket(rctx request.CTX, options *model.SupportPack
 				fileDatas = append(fileDatas, node...)
 			}
 			mut.Unlock()
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -162,6 +171,11 @@ func (a *App) getSupportPacketStats(rctx request.CTX) (*model.FileData, error) {
 	stats.Guests, err = a.Srv().Store().User().AnalyticsGetGuestCount()
 	if err != nil {
 		rErr = multierror.Append(errors.Wrap(err, "failed to get guest count"))
+	}
+
+	stats.SingleChannelGuests, err = a.Srv().Store().User().AnalyticsGetSingleChannelGuestCount()
+	if err != nil {
+		rErr = multierror.Append(errors.Wrap(err, "failed to get single channel guest count"))
 	}
 
 	stats.BotAccounts, err = a.Srv().Store().User().Count(model.UserCountOptions{IncludeBotAccounts: true, ExcludeRegularUsers: true})
@@ -244,10 +258,6 @@ func (a *App) getSupportPacketJobList(rctx request.CTX) (*model.FileData, error)
 	jobs.ElasticPostAggregationJobs, err = a.Srv().Store().Job().GetAllByTypePage(rctx, model.JobTypeElasticsearchPostAggregation, 0, numberOfJobsRuns)
 	if err != nil {
 		rErr = multierror.Append(errors.Wrap(err, "error while getting ES post aggregation jobs"))
-	}
-	jobs.BlevePostIndexingJobs, err = a.Srv().Store().Job().GetAllByTypePage(rctx, model.JobTypeBlevePostIndexing, 0, numberOfJobsRuns)
-	if err != nil {
-		rErr = multierror.Append(errors.Wrap(err, "error while getting bleve post indexing jobs"))
 	}
 	jobs.MigrationJobs, err = a.Srv().Store().Job().GetAllByTypePage(rctx, model.JobTypeMigrations, 0, numberOfJobsRuns)
 	if err != nil {
@@ -345,7 +355,7 @@ func (a *App) getPluginsFile(_ request.CTX) (*model.FileData, error) {
 }
 
 func (a *App) getSupportPacketMetadata(_ request.CTX) (*model.FileData, error) {
-	metadata, err := model.GeneratePacketMetadata(model.SupportPacketType, a.TelemetryId(), a.License(), nil)
+	metadata, err := model.GeneratePacketMetadata(model.SupportPacketType, a.ServerId(), a.License(), nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate Packet metadata")
 	}
@@ -360,4 +370,25 @@ func (a *App) getSupportPacketMetadata(_ request.CTX) (*model.FileData, error) {
 		Body:     b,
 	}
 	return fileData, nil
+}
+
+func (a *App) getSupportPacketDatabaseSchema(rctx request.CTX) (*model.FileData, error) {
+	if *a.Config().SqlSettings.DriverName != model.DatabaseDriverPostgres {
+		return nil, nil
+	}
+
+	schemaInfo, err := a.Srv().Store().GetSchemaDefinition()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get schema definition")
+	}
+
+	schemaDump, err := yaml.Marshal(schemaInfo)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to marshal schema into YAML")
+	}
+
+	return &model.FileData{
+		Filename: "database_schema.yaml",
+		Body:     schemaDump,
+	}, nil
 }

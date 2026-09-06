@@ -28,7 +28,6 @@ import (
 
 func TestGetPing(t *testing.T) {
 	th := Setup(t)
-	defer th.TearDown()
 
 	th.TestForAllClients(t, func(t *testing.T, client *model.Client4) {
 		t.Run("healthy", func(t *testing.T) {
@@ -68,9 +67,9 @@ func TestGetPing(t *testing.T) {
 		_, ok := respMap["TestFeatureFlag"]
 		assert.Equal(t, false, ok)
 
-		// Run the environment variable override code to test
-		os.Setenv("MM_FEATUREFLAGS_TESTFEATURE", "testvalueunique")
-		defer os.Unsetenv("MM_FEATUREFLAGS_TESTFEATURE")
+		// Feature flags in ping response come from env var overrides, not config.
+		// Must use real env vars + ReloadConfig to test this path.
+		t.Setenv("MM_FEATUREFLAGS_TESTFEATURE", "testvalueunique")
 		err = th.App.ReloadConfig()
 		require.NoError(t, err)
 
@@ -111,8 +110,8 @@ func TestGetPing(t *testing.T) {
 }
 
 func TestGetAudits(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 	client := th.Client
 
 	audits, _, err := th.SystemAdminClient.GetAudits(context.Background(), 0, 100, "")
@@ -143,8 +142,8 @@ func TestGetAudits(t *testing.T) {
 }
 
 func TestEmailTest(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 	client := th.Client
 
 	dir, err := os.MkdirTemp("", "")
@@ -154,27 +153,27 @@ func TestEmailTest(t *testing.T) {
 	es := model.EmailSettings{}
 	es.SetDefaults(false)
 
-	es.SMTPServer = model.NewPointer("")
-	es.SMTPPort = model.NewPointer("")
-	es.SMTPPassword = model.NewPointer("")
-	es.FeedbackName = model.NewPointer("")
-	es.FeedbackEmail = model.NewPointer("some-addr@test.com")
-	es.ReplyToAddress = model.NewPointer("some-addr@test.com")
-	es.ConnectionSecurity = model.NewPointer("")
-	es.SMTPUsername = model.NewPointer("")
-	es.EnableSMTPAuth = model.NewPointer(false)
-	es.SkipServerCertificateVerification = model.NewPointer(true)
-	es.SendEmailNotifications = model.NewPointer(false)
-	es.SMTPServerTimeout = model.NewPointer(15)
+	es.SMTPServer = new("")
+	es.SMTPPort = new("")
+	es.SMTPPassword = new("")
+	es.FeedbackName = new("")
+	es.FeedbackEmail = new("some-addr@test.com")
+	es.ReplyToAddress = new("some-addr@test.com")
+	es.ConnectionSecurity = new("")
+	es.SMTPUsername = new("")
+	es.EnableSMTPAuth = new(false)
+	es.SkipServerCertificateVerification = new(true)
+	es.SendEmailNotifications = new(false)
+	es.SMTPServerTimeout = new(15)
 
 	config := model.Config{
 		ServiceSettings: model.ServiceSettings{
-			SiteURL: model.NewPointer(""),
+			SiteURL: new(""),
 		},
 		EmailSettings: es,
 		FileSettings: model.FileSettings{
 			DriverName: model.NewPointer(model.ImageDriverLocal),
-			Directory:  model.NewPointer(dir),
+			Directory:  new(dir),
 		},
 	}
 
@@ -224,16 +223,17 @@ func TestEmailTest(t *testing.T) {
 }
 
 func TestGenerateSupportPacket(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	th.LoginSystemManager()
-	defer th.TearDown()
+
+	th.LoginSystemManager(t)
 
 	t.Run("system admin and local client can generate Support Packet", func(t *testing.T) {
 		l := model.NewTestLicense()
 		th.App.Srv().SetLicense(l)
 
 		th.TestForSystemAdminAndLocal(t, func(t *testing.T, c *model.Client4) {
-			file, filename, _, err := th.SystemAdminClient.GenerateSupportPacket(context.Background())
+			file, filename, resp, err := th.SystemAdminClient.GenerateSupportPacket(context.Background())
 			require.NoError(t, err)
 
 			assert.Contains(t, filename, "mm_support_packet_My_awesome_Company_")
@@ -241,6 +241,9 @@ func TestGenerateSupportPacket(t *testing.T) {
 			d, err := io.ReadAll(file)
 			require.NoError(t, err)
 			assert.NotZero(t, len(d))
+
+			// Verify that the Cache-Control header is set to prevent caching
+			assert.Equal(t, "no-cache, no-store, must-revalidate", resp.Header.Get("Cache-Control"))
 		})
 	})
 
@@ -283,6 +286,7 @@ func TestGenerateSupportPacket(t *testing.T) {
 }
 
 func TestSupportPacketFileName(t *testing.T) {
+	mainHelper.Parallel(t)
 	tests := map[string]struct {
 		now          time.Time
 		customerName string
@@ -314,8 +318,8 @@ func TestSupportPacketFileName(t *testing.T) {
 }
 
 func TestSiteURLTest(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 	client := th.Client
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -360,8 +364,8 @@ func TestSiteURLTest(t *testing.T) {
 }
 
 func TestDatabaseRecycle(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 	client := th.Client
 
 	t.Run("as system user", func(t *testing.T) {
@@ -385,8 +389,8 @@ func TestDatabaseRecycle(t *testing.T) {
 }
 
 func TestInvalidateCaches(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 	client := th.Client
 
 	t.Run("as system user", func(t *testing.T) {
@@ -410,23 +414,50 @@ func TestInvalidateCaches(t *testing.T) {
 }
 
 func TestGetLogs(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 
-	for i := 0; i < 20; i++ {
-		th.TestLogger.Info(strconv.Itoa(i))
+	testID := model.NewId()
+	expectedMessages := make([]string, 0, 20)
+	for i := range 20 {
+		message := fmt.Sprintf("getlogs_verify_%s_%d", testID, i)
+		expectedMessages = append(expectedMessages, message)
+		th.TestLogger.Info(message)
 	}
 
 	err := th.TestLogger.Flush()
 	require.NoError(t, err, "failed to flush log")
 
 	th.TestForSystemAdminAndLocal(t, func(t *testing.T, c *model.Client4) {
-		logs, _, err2 := c.GetLogs(context.Background(), 0, 10)
-		require.NoError(t, err2)
-		require.Len(t, logs, 10)
+		var logs []string
+		containsLogMessage := func(logs []string, expected string) bool {
+			for _, logLine := range logs {
+				if strings.Contains(logLine, expected) {
+					return true
+				}
+			}
+			return false
+		}
+		containsExpectedMessages := func(logs []string) bool {
+			for _, expected := range expectedMessages {
+				if !containsLogMessage(logs, expected) {
+					return false
+				}
+			}
+			return true
+		}
 
-		for i := 10; i < 20; i++ {
-			assert.Containsf(t, logs[i-10], fmt.Sprintf(`"msg":"%d"`, i), "Log line doesn't contain correct message")
+		require.Eventually(t, func() bool {
+			logs, _, err = c.GetLogs(context.Background(), 0, 200)
+			if err != nil {
+				return false
+			}
+
+			return containsExpectedMessages(logs)
+		}, 5*time.Second, 25*time.Millisecond)
+
+		for _, expected := range expectedMessages {
+			assert.Truef(t, containsLogMessage(logs, expected), "Log lines don't contain %q", expected)
 		}
 
 		logs, _, err = c.GetLogs(context.Background(), 1, 10)
@@ -457,11 +488,93 @@ func TestGetLogs(t *testing.T) {
 	CheckUnauthorizedStatus(t, resp)
 }
 
-func TestDownloadLogs(t *testing.T) {
+func TestQueryLogs(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 
-	for i := 0; i < 20; i++ {
+	testID := model.NewId()
+	expectedMessages := make([]string, 0, 5)
+	for i := range 5 {
+		message := fmt.Sprintf("querylogs_verify_%s_%d", testID, i)
+		expectedMessages = append(expectedMessages, message)
+		th.TestLogger.Info(message)
+	}
+	require.NoError(t, th.TestLogger.Flush(), "failed to flush log")
+
+	containsAllMessages := func(combined string) bool {
+		for _, expected := range expectedMessages {
+			if !strings.Contains(combined, expected) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// waitForFilteredLogs queries with the filter, asserting a successful response, and
+	// polls until the expected messages appear (log availability after Flush is
+	// asynchronous). It returns the per-node lines from the last response.
+	waitForFilteredLogs := func(t *testing.T, filter *model.LogFilter) map[string][]json.RawMessage {
+		t.Helper()
+		var nodes map[string][]json.RawMessage
+		require.Eventually(t, func() bool {
+			decoded, _, err := th.SystemAdminClient.QueryLogs(context.Background(), 0, 200, filter)
+			if err != nil {
+				return false
+			}
+
+			var combined strings.Builder
+			for _, lines := range decoded {
+				for _, line := range lines {
+					combined.Write(line)
+				}
+			}
+			if !containsAllMessages(combined.String()) {
+				return false
+			}
+			nodes = decoded
+			return true
+		}, 5*time.Second, 25*time.Millisecond, "expected logged messages to be returned")
+		return nodes
+	}
+
+	t.Run("empty bounds return unfiltered logs", func(t *testing.T) {
+		nodes := waitForFilteredLogs(t, &model.LogFilter{DateFrom: "", DateTo: ""})
+		require.Contains(t, nodes, "default")
+	})
+
+	t.Run("valid bounds are accepted and still return matching logs", func(t *testing.T) {
+		filter := &model.LogFilter{
+			DateFrom: "2000-01-01 00:00:00.000 +00:00",
+			DateTo:   "2100-01-01 00:00:00.000 +00:00",
+		}
+		nodes := waitForFilteredLogs(t, filter)
+		require.Contains(t, nodes, "default")
+	})
+
+	t.Run("malformed date_from is rejected with 400", func(t *testing.T) {
+		_, resp, err := th.SystemAdminClient.QueryLogs(context.Background(), 0, 200, &model.LogFilter{DateFrom: "not-a-date", DateTo: ""})
+		CheckErrorID(t, err, "model.log_filter.is_valid.date_from.app_error")
+		CheckBadRequestStatus(t, resp)
+	})
+
+	t.Run("malformed date_to is rejected with 400", func(t *testing.T) {
+		_, resp, err := th.SystemAdminClient.QueryLogs(context.Background(), 0, 200, &model.LogFilter{DateFrom: "", DateTo: "also-not-a-date"})
+		CheckErrorID(t, err, "model.log_filter.is_valid.date_to.app_error")
+		CheckBadRequestStatus(t, resp)
+	})
+
+	t.Run("non-admin is forbidden", func(t *testing.T) {
+		_, resp, err := th.Client.QueryLogs(context.Background(), 0, 200, &model.LogFilter{})
+		require.Error(t, err)
+		CheckForbiddenStatus(t, resp)
+	})
+}
+
+func TestDownloadLogs(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t)
+
+	for i := range 20 {
 		th.TestLogger.Info(strconv.Itoa(i))
 	}
 	err := th.TestLogger.Flush()
@@ -475,7 +588,7 @@ func TestDownloadLogs(t *testing.T) {
 		require.Contains(t, resp.Header.Get("Content-Disposition"), "attachment;filename=\"mattermost.log\"")
 
 		bodyString := string(resData)
-		for i := 0; i < 20; i++ {
+		for i := range 20 {
 			assert.Contains(t, bodyString, fmt.Sprintf(`"msg":"%d"`, i))
 		}
 	})
@@ -500,8 +613,8 @@ func TestDownloadLogs(t *testing.T) {
 }
 
 func TestPostLog(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 	client := th.Client
 
 	enableDev := *th.App.Config().ServiceSettings.EnableDeveloper
@@ -542,8 +655,8 @@ func TestPostLog(t *testing.T) {
 }
 
 func TestGetAnalyticsOld(t *testing.T) {
-	th := Setup(t).InitBasic()
-	defer th.TearDown()
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
 	client := th.Client
 
 	rows, resp, err := client.GetAnalyticsOld(context.Background(), "", "")
@@ -595,8 +708,11 @@ func TestGetAnalyticsOld(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "total_websocket_connections", rows2[5].Name)
 	assert.Equal(t, float64(1), rows2[5].Value)
-
 	WebSocketClient.Close()
+
+	// Give it a second for internal webhub counters to be updated after the client disconnects.
+	// Test can be flaky otherwise.
+	time.Sleep(time.Second)
 
 	rows2, _, err = th.SystemAdminClient.GetAnalyticsOld(context.Background(), "standard", "")
 	require.NoError(t, err)
@@ -612,8 +728,8 @@ func TestGetAnalyticsOld(t *testing.T) {
 }
 
 func TestS3TestConnection(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 	client := th.Client
 
 	s3Host := os.Getenv("CI_MINIO_HOST")
@@ -634,11 +750,11 @@ func TestS3TestConnection(t *testing.T) {
 	fs.DriverName = model.NewPointer(model.ImageDriverS3)
 	fs.AmazonS3AccessKeyId = model.NewPointer(model.MinioAccessKey)
 	fs.AmazonS3SecretAccessKey = model.NewPointer(model.MinioSecretKey)
-	fs.AmazonS3Bucket = model.NewPointer("")
-	fs.AmazonS3Endpoint = model.NewPointer(s3Endpoint)
-	fs.AmazonS3Region = model.NewPointer("")
-	fs.AmazonS3PathPrefix = model.NewPointer("")
-	fs.AmazonS3SSL = model.NewPointer(false)
+	fs.AmazonS3Bucket = new("")
+	fs.AmazonS3Endpoint = new(s3Endpoint)
+	fs.AmazonS3Region = new("")
+	fs.AmazonS3PathPrefix = new("")
+	fs.AmazonS3SSL = new(false)
 
 	config := model.Config{
 		FileSettings: fs,
@@ -657,26 +773,26 @@ func TestS3TestConnection(t *testing.T) {
 		// If this fails, check the test configuration to ensure minio is setup with the
 		// `mattermost-test` bucket defined by model.MINIO_BUCKET.
 		*config.FileSettings.AmazonS3Bucket = model.MinioBucket
-		config.FileSettings.AmazonS3PathPrefix = model.NewPointer("")
+		config.FileSettings.AmazonS3PathPrefix = new("")
 		*config.FileSettings.AmazonS3Region = "us-east-1"
 		resp, err = th.SystemAdminClient.TestS3Connection(context.Background(), &config)
 		require.NoError(t, err)
 		CheckOKStatus(t, resp)
 
-		config.FileSettings.AmazonS3Region = model.NewPointer("")
+		config.FileSettings.AmazonS3Region = new("")
 		resp, err = th.SystemAdminClient.TestS3Connection(context.Background(), &config)
 		require.NoError(t, err)
 		CheckOKStatus(t, resp)
 
-		config.FileSettings.AmazonS3Bucket = model.NewPointer("Wrong_bucket")
+		config.FileSettings.AmazonS3Bucket = new("Wrong_bucket")
 		resp, err = th.SystemAdminClient.TestS3Connection(context.Background(), &config)
 		CheckInternalErrorStatus(t, resp)
-		CheckErrorID(t, err, "api.file.test_connection_s3_bucket_does_not_exist.app_error")
+		CheckErrorID(t, err, "api.file.test_connection_no_bucket.app_error")
 
 		*config.FileSettings.AmazonS3Bucket = "shouldnotcreatenewbucket"
 		resp, err = th.SystemAdminClient.TestS3Connection(context.Background(), &config)
 		CheckInternalErrorStatus(t, resp)
-		CheckErrorID(t, err, "api.file.test_connection_s3_bucket_does_not_exist.app_error")
+		CheckErrorID(t, err, "api.file.test_connection_no_bucket.app_error")
 	})
 
 	t.Run("with incorrect credentials", func(t *testing.T) {
@@ -684,21 +800,117 @@ func TestS3TestConnection(t *testing.T) {
 		*configCopy.FileSettings.AmazonS3AccessKeyId = "invalidaccesskey"
 		resp, err := th.SystemAdminClient.TestS3Connection(context.Background(), &configCopy)
 		CheckInternalErrorStatus(t, resp)
-		CheckErrorID(t, err, "api.file.test_connection_s3_auth.app_error")
+		CheckErrorID(t, err, "api.file.test_connection_auth.app_error")
 	})
 
 	t.Run("empty file settings", func(t *testing.T) {
 		config.FileSettings = model.FileSettings{}
 		resp, err := th.SystemAdminClient.TestS3Connection(context.Background(), &config)
 		require.Error(t, err)
-		CheckErrorID(t, err, "api.file.test_connection_s3_settings_nil.app_error")
+		CheckErrorID(t, err, "api.file.test_connection_settings_nil.app_error")
 		CheckBadRequestStatus(t, resp)
+	})
+
+	t.Run("desanitizes FakeSetting using running config", func(t *testing.T) {
+		// Seed the running config with valid Minio credentials so the
+		// running config's AmazonS3SecretAccessKey is the real secret.
+		th.App.UpdateConfig(func(c *model.Config) {
+			c.FileSettings.DriverName = model.NewPointer(model.ImageDriverS3)
+			c.FileSettings.AmazonS3AccessKeyId = model.NewPointer(model.MinioAccessKey)
+			c.FileSettings.AmazonS3SecretAccessKey = model.NewPointer(model.MinioSecretKey)
+			c.FileSettings.AmazonS3Bucket = model.NewPointer(model.MinioBucket)
+			c.FileSettings.AmazonS3Endpoint = model.NewPointer(s3Endpoint)
+			c.FileSettings.AmazonS3Region = model.NewPointer("us-east-1")
+			c.FileSettings.AmazonS3PathPrefix = model.NewPointer("")
+			c.FileSettings.AmazonS3SSL = model.NewPointer(false)
+		})
+
+		// Build a request body that mirrors what the System Console sends
+		// after the admin clicks Test Connection without re-entering the
+		// secret: every field present, but the secret slot is the
+		// FakeSetting placeholder.
+		body := model.Config{FileSettings: model.FileSettings{}}
+		body.FileSettings.SetDefaults(false)
+		body.FileSettings.DriverName = model.NewPointer(model.ImageDriverS3)
+		body.FileSettings.AmazonS3AccessKeyId = model.NewPointer(model.MinioAccessKey)
+		body.FileSettings.AmazonS3SecretAccessKey = model.NewPointer(model.FakeSetting)
+		body.FileSettings.AmazonS3Bucket = model.NewPointer(model.MinioBucket)
+		body.FileSettings.AmazonS3Endpoint = model.NewPointer(s3Endpoint)
+		body.FileSettings.AmazonS3Region = model.NewPointer("us-east-1")
+		body.FileSettings.AmazonS3PathPrefix = model.NewPointer("")
+		body.FileSettings.AmazonS3SSL = model.NewPointer(false)
+
+		// If desanitize is not running, the server tests with the literal
+		// "********" string as the secret and Minio returns a 403 auth
+		// error. A 200 here proves the placeholder was swapped for the
+		// real running-config value before the connection test.
+		resp, err := th.SystemAdminClient.TestS3Connection(context.Background(), &body)
+		require.NoError(t, err)
+		CheckOKStatus(t, resp)
+	})
+
+	t.Run("unsupported driver", func(t *testing.T) {
+		unsupported := model.FileSettings{}
+		unsupported.SetDefaults(false)
+		unsupported.DriverName = model.NewPointer("bogus")
+		resp, err := th.SystemAdminClient.TestS3Connection(context.Background(), &model.Config{FileSettings: unsupported})
+		require.Error(t, err)
+		CheckErrorID(t, err, "api.file.test_connection_unsupported_driver.app_error")
+		CheckBadRequestStatus(t, resp)
+	})
+
+	t.Run("empty driver name", func(t *testing.T) {
+		empty := model.FileSettings{}
+		empty.SetDefaults(false)
+		empty.DriverName = model.NewPointer("")
+		resp, err := th.SystemAdminClient.TestS3Connection(context.Background(), &model.Config{FileSettings: empty})
+		require.Error(t, err)
+		CheckErrorID(t, err, "api.file.test_connection_unsupported_driver.app_error")
+		CheckBadRequestStatus(t, resp)
+	})
+
+	t.Run("azure missing mandatory fields", func(t *testing.T) {
+		// CheckMandatoryAzureFields rejects requests that don't carry an
+		// Azure storage account, container, and access key. Each missing
+		// field path must produce the same 400 with the dedicated error
+		// ID so admins get a clear signal in the System Console toast.
+		base := model.FileSettings{}
+		base.SetDefaults(false)
+		base.DriverName = model.NewPointer(model.ImageDriverAzure)
+
+		cases := []struct {
+			name string
+			mut  func(*model.FileSettings)
+		}{
+			{"missing storage account", func(fs *model.FileSettings) {
+				fs.AzureContainer = model.NewPointer("mattermost")
+				fs.AzureAccessKey = model.NewPointer("secret")
+			}},
+			{"missing container", func(fs *model.FileSettings) {
+				fs.AzureStorageAccount = model.NewPointer("acmemattermost")
+				fs.AzureAccessKey = model.NewPointer("secret")
+			}},
+			{"missing access key", func(fs *model.FileSettings) {
+				fs.AzureStorageAccount = model.NewPointer("acmemattermost")
+				fs.AzureContainer = model.NewPointer("mattermost")
+			}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				fs := base
+				tc.mut(&fs)
+				resp, err := th.SystemAdminClient.TestS3Connection(context.Background(), &model.Config{FileSettings: fs})
+				require.Error(t, err)
+				CheckErrorID(t, err, "api.admin.test_azure.missing_azure_field")
+				CheckBadRequestStatus(t, resp)
+			})
+		}
 	})
 }
 
 func TestSupportedTimezones(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 	client := th.Client
 
 	supportedTimezonesFromConfig := th.App.Timezones().GetSupported()
@@ -709,6 +921,7 @@ func TestSupportedTimezones(t *testing.T) {
 }
 
 func TestRedirectLocation(t *testing.T) {
+	mainHelper.Parallel(t)
 	expected := "https://mattermost.com/wp-content/themes/mattermostv2/img/logo-light.svg"
 
 	testServer := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
@@ -722,7 +935,6 @@ func TestRedirectLocation(t *testing.T) {
 	mockBitlyLink := testServer.URL
 
 	th := Setup(t)
-	defer th.TearDown()
 	client := th.Client
 	enableLinkPreviews := *th.App.Config().ServiceSettings.EnableLinkPreviews
 	defer func() {
@@ -799,8 +1011,8 @@ func TestRedirectLocation(t *testing.T) {
 }
 
 func TestSetServerBusy(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 
 	const secs = 30
 
@@ -819,8 +1031,8 @@ func TestSetServerBusy(t *testing.T) {
 }
 
 func TestSetServerBusyInvalidParam(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 
 	th.TestForSystemAdminAndLocal(t, func(t *testing.T, c *model.Client4) {
 		params := []int{-1, 0, MaxServerBusySeconds + 1}
@@ -834,8 +1046,8 @@ func TestSetServerBusyInvalidParam(t *testing.T) {
 }
 
 func TestClearServerBusy(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 
 	th.App.Srv().Platform().Busy.Set(time.Second * 30)
 	t.Run("as system user", func(t *testing.T) {
@@ -854,8 +1066,8 @@ func TestClearServerBusy(t *testing.T) {
 }
 
 func TestGetServerBusy(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 
 	th.App.Srv().Platform().Busy.Set(time.Second * 30)
 
@@ -874,8 +1086,8 @@ func TestGetServerBusy(t *testing.T) {
 }
 
 func TestServerBusy503(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 
 	th.App.Srv().Platform().Busy.Set(time.Second * 30)
 
@@ -900,13 +1112,6 @@ func TestServerBusy503(t *testing.T) {
 		CheckServiceUnavailableStatus(t, resp)
 	})
 
-	t.Run("search archived channels while busy", func(t *testing.T) {
-		cs := &model.ChannelSearch{}
-		_, resp, err := th.SystemAdminClient.SearchArchivedChannels(context.Background(), "foo", cs)
-		require.Error(t, err)
-		CheckServiceUnavailableStatus(t, resp)
-	})
-
 	th.App.Srv().Platform().Busy.Clear()
 
 	t.Run("search users while not busy", func(t *testing.T) {
@@ -917,11 +1122,13 @@ func TestServerBusy503(t *testing.T) {
 }
 
 func TestPushNotificationAck(t *testing.T) {
-	th := Setup(t).InitBasic()
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
+
 	api, err := Init(th.Server)
 	require.NoError(t, err)
-	session, _ := th.App.GetSession(th.Client.AuthToken)
-	defer th.TearDown()
+	session, appErr := th.App.GetSession(th.Client.AuthToken)
+	require.Nil(t, appErr)
 
 	t.Run("should return error when the ack body is not passed", func(t *testing.T) {
 		handler := api.APIHandler(pushNotificationAck)
@@ -935,8 +1142,8 @@ func TestPushNotificationAck(t *testing.T) {
 	})
 
 	t.Run("should return error when the ack post is not authorized for the user", func(t *testing.T) {
-		privateChannel := th.CreateChannelWithClient(th.SystemAdminClient, model.ChannelTypePrivate)
-		privatePost := th.CreatePostWithClient(th.SystemAdminClient, privateChannel)
+		privateChannel := th.CreateChannelWithClient(t, th.SystemAdminClient, model.ChannelTypePrivate)
+		privatePost := th.CreatePostWithClient(t, th.SystemAdminClient, privateChannel)
 
 		handler := api.APIHandler(pushNotificationAck)
 		resp := httptest.NewRecorder()
@@ -1010,8 +1217,8 @@ func TestPushNotificationAck(t *testing.T) {
 }
 
 func TestCompleteOnboarding(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 
 	path, _ := fileutils.FindDir("tests")
 	signatureFilename := "testplugin2.tar.gz.sig"
@@ -1143,8 +1350,8 @@ func TestCompleteOnboarding(t *testing.T) {
 }
 
 func TestGetAppliedSchemaMigrations(t *testing.T) {
+	mainHelper.Parallel(t)
 	th := Setup(t)
-	defer th.TearDown()
 
 	t.Run("as a regular user", func(t *testing.T) {
 		_, resp, err := th.Client.GetAppliedSchemaMigrations(context.Background())
@@ -1155,7 +1362,7 @@ func TestGetAppliedSchemaMigrations(t *testing.T) {
 	t.Run("as a system manager role", func(t *testing.T) {
 		_, appErr := th.App.UpdateUserRoles(th.Context, th.BasicUser2.Id, model.SystemManagerRoleId, false)
 		require.Nil(t, appErr)
-		th.LoginBasic2()
+		th.LoginBasic2(t)
 
 		_, resp, err := th.Client.GetAppliedSchemaMigrations(context.Background())
 		require.NoError(t, err)
@@ -1170,6 +1377,7 @@ func TestGetAppliedSchemaMigrations(t *testing.T) {
 }
 
 func TestCheckHasNilFields(t *testing.T) {
+	mainHelper.Parallel(t)
 	t.Run("check if the empty struct has nil fields", func(t *testing.T) {
 		var s model.FileSettings
 		res := checkHasNilFields(&s)

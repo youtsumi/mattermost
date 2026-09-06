@@ -11,6 +11,7 @@ import ChevronDownIcon from '@mattermost/compass-icons/components/chevron-down';
 import type {UserProfile} from '@mattermost/types/users';
 
 import {
+    isChannelAutotranslated as isChannelAutotranslatedSelector,
     getCurrentChannel,
     isCurrentChannelDefault,
     isCurrentChannelFavorite,
@@ -27,11 +28,15 @@ import {getIsChannelBookmarksEnabled} from 'components/channel_bookmarks/utils';
 import * as Menu from 'components/menu';
 
 import {Constants} from 'utils/constants';
+import {canPopout, isChannelPopoutWindow} from 'utils/popouts/popout_windows';
+
+import type {GlobalState} from 'types/store';
 
 import ChannelDirectMenu from './channel_header_menu_items/channel_header_direct_menu';
 import ChannelGroupMenu from './channel_header_menu_items/channel_header_group_menu';
 import ChannelHeaderMobileMenu from './channel_header_menu_items/channel_header_mobile_menu';
 import ChannelPublicPrivateMenu from './channel_header_menu_items/channel_header_public_private_menu';
+import MenuItemOpenInNewWindow from './menu_items/open_in_new_window';
 
 import ChannelHeaderTitleDirect from '../channel_header/channel_header_title_direct';
 import ChannelHeaderTitleGroup from '../channel_header/channel_header_title_group';
@@ -42,7 +47,7 @@ type Props = {
     archivedIcon?: JSX.Element;
     sharedIcon?: JSX.Element;
     isMobile?: boolean;
-}
+};
 
 export default function ChannelHeaderMenu({dmUser, gmMembers, isMobile, archivedIcon, sharedIcon}: Props): JSX.Element | null {
     const intl = useIntl();
@@ -55,8 +60,7 @@ export default function ChannelHeaderMenu({dmUser, gmMembers, isMobile, archived
     const isLicensedForLDAPGroups = useSelector(getLicense).LDAPGroups === 'true';
     const pluginMenuItems = useSelector(getChannelHeaderMenuPluginComponents);
     const isChannelBookmarksEnabled = useSelector(getIsChannelBookmarksEnabled);
-
-    const isReadonly = false;
+    const isChannelAutotranslated = useSelector((state: GlobalState) => (channel?.id ? isChannelAutotranslatedSelector(state, channel.id) : false));
 
     if (!channel) {
         return null;
@@ -128,6 +132,7 @@ export default function ChannelHeaderMenu({dmUser, gmMembers, isMobile, archived
             }}
             menu={{
                 id: 'channelHeaderDropdownMenu',
+                'aria-label': ariaLabel.toLowerCase(),
             }}
             transformOrigin={{
                 horizontal: 'left',
@@ -138,6 +143,9 @@ export default function ChannelHeaderMenu({dmUser, gmMembers, isMobile, archived
                 horizontal: 'left',
             }}
         >
+            {canPopout() && !isChannelPopoutWindow() && (
+                <MenuItemOpenInNewWindow channel={channel}/>
+            )}
             {isDirect && (
                 <ChannelDirectMenu
                     channel={channel}
@@ -147,6 +155,7 @@ export default function ChannelHeaderMenu({dmUser, gmMembers, isMobile, archived
                     isFavorite={isFavorite}
                     isMobile={isMobile || false}
                     isChannelBookmarksEnabled={isChannelBookmarksEnabled}
+                    isChannelAutotranslated={isChannelAutotranslated}
                 />
             )}
             {isGroup && (
@@ -158,6 +167,7 @@ export default function ChannelHeaderMenu({dmUser, gmMembers, isMobile, archived
                     isFavorite={isFavorite}
                     isMobile={isMobile || false}
                     isChannelBookmarksEnabled={isChannelBookmarksEnabled}
+                    isChannelAutotranslated={isChannelAutotranslated}
                 />
             )}
             {(!isDirect && !isGroup) && (
@@ -169,9 +179,9 @@ export default function ChannelHeaderMenu({dmUser, gmMembers, isMobile, archived
                     isFavorite={isFavorite}
                     isMobile={isMobile || false}
                     isDefault={isDefault}
-                    isReadonly={isReadonly}
                     isLicensedForLDAPGroups={isLicensedForLDAPGroups}
                     isChannelBookmarksEnabled={isChannelBookmarksEnabled}
+                    isChannelAutotranslated={isChannelAutotranslated}
                 />
             )}
 
@@ -183,4 +193,3 @@ export default function ChannelHeaderMenu({dmUser, gmMembers, isMobile, archived
         </Menu.Container>
     );
 }
-

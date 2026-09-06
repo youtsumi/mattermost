@@ -1,11 +1,14 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
+import {FloatingPortal} from '@floating-ui/react';
 import type {Placement} from '@floating-ui/react-dom';
 import {useFloating, offset as floatingOffset, autoUpdate} from '@floating-ui/react-dom';
-import React, {useLayoutEffect} from 'react';
+import React, {useLayoutEffect, useRef} from 'react';
 import {CSSTransition} from 'react-transition-group';
 import styled from 'styled-components';
+
+import {RootHtmlPortalId} from 'utils/constants';
 
 const Overlay = styled.div`
     background-color: rgba(0, 0, 0, 0.5);
@@ -72,6 +75,7 @@ export const TaskListPopover = ({
         })],
         whileElementsMounted: autoUpdate,
     });
+    const overlayRef = useRef<HTMLDivElement>(null);
 
     useLayoutEffect(() => {
         setReference(trigger);
@@ -86,14 +90,16 @@ export const TaskListPopover = ({
         },
     };
     return (
-        <>
+        <FloatingPortal id={RootHtmlPortalId}>
             <CSSTransition
                 timeout={150}
                 classNames='fade'
                 in={isVisible}
+                nodeRef={overlayRef}
                 unmountOnExit={true}
             >
                 <Overlay
+                    ref={overlayRef}
                     onClick={onClick}
                     data-cy='onboarding-task-list-overlay'
                 />
@@ -104,7 +110,7 @@ export const TaskListPopover = ({
             >
                 {children}
             </div>
-        </>
+        </FloatingPortal>
     );
 };
 

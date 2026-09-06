@@ -1,371 +1,242 @@
-// Jest Snapshot v1, https://goo.gl/fbAQLP
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
 exports[`components/threading/global_threads/thread_item should report total number of replies 1`] = `
-<div
-  aria-label="Thread by Someone"
-  className="ThreadItem"
-  id=""
-  onClick={[Function]}
-  onKeyDown={[Function]}
-  role="link"
-  tabIndex={0}
->
-  <header>
+<body>
+  <div>
     <div
-      className="ThreadItem__author"
+      aria-describedby="ThreadItem__timestamp_1y8hpek81byspd4enyk9mp1ncw"
+      aria-label="Thread by Someone"
+      class="ThreadItem"
+      id=""
+      role="link"
+      tabindex="0"
     >
-      Someone
-    </div>
-    <div
-      className="ThreadItem__tags"
-    >
-      <Memo(Tag)
-        onClick={[Function]}
-        text="Team name"
-      />
-    </div>
-    <MockTimestamp
-      className="alt-hidden"
-      day="numeric"
-      units={
-        Array [
-          "now",
-          "minute",
-          "hour",
-          "day",
-          "week",
-        ]
-      }
-      useTime={false}
-    />
-  </header>
-  <div
-    className="menu-anchor alt-visible"
-  >
-    <MockThreadMenu
-      hasUnreads={false}
-      isFollowing={true}
-      threadId="1y8hpek81byspd4enyk9mp1ncw"
-      unreadTimestamp={1611786714912}
-    >
-      <WithTooltip
-        title={
-          <Memo(MemoizedFormattedMessage)
-            defaultMessage="Actions"
-            id="threading.threadItem.menu"
-          />
-        }
+      <div
+        class="thread-item-header"
       >
-        <Memo(Button)
-          aria-label="Actions"
-          className="Button___icon"
-          marginTop={true}
+        <div
+          class="ThreadItem__author"
         >
-          <DotsVerticalIcon
-            size={18}
-          />
-        </Memo(Button)>
-      </WithTooltip>
-    </MockThreadMenu>
+          Someone
+        </div>
+        <div
+          class="ThreadItem__tags"
+        >
+          <button
+            class="TagWrapper-kezsCu ftZQnc Tag Tag--xs"
+          >
+            <span
+              class="TagText-bWoQAI beIloY"
+            >
+              Team name
+            </span>
+          </button>
+        </div>
+        <span>
+          timestamp
+        </span>
+      </div>
+      <div
+        class="menu-anchor alt-visible"
+      >
+        <div
+          class="thread-menu"
+        />
+      </div>
+      <div
+        class="preview"
+        dir="auto"
+      >
+        <span>
+          test msg
+        </span>
+      </div>
+      <div
+        class="activity"
+      >
+        <div
+          class="avatars"
+        >
+          avatars
+        </div>
+        9 replies
+      </div>
+      <span
+        class="sr-only"
+        id="ThreadItem__timestamp_1y8hpek81byspd4enyk9mp1ncw"
+      >
+        Last reply 
+        <span>
+          timestamp
+        </span>
+      </span>
+    </div>
   </div>
-  <div
-    className="preview"
-    dir="auto"
-    onClick={[Function]}
-    onKeyDown={[Function]}
-  >
-    <MockMarkdown
-      imageProps={
-        Object {
-          "onImageHeightChanged": [Function],
-          "onImageLoaded": [Function],
-        }
-      }
-      mentionKeys={Array []}
-      message="test msg"
-      options={
-        Object {
-          "atMentions": true,
-          "mentionHighlight": false,
-          "singleline": true,
-        }
-      }
-    />
-  </div>
-  <div
-    className="activity"
-  >
-    <MockAvatars
-      size="xs"
-      userIds={
-        Array [
-          "mt5td9mdriyapmwuh5pc84dmhr",
-          "ij61jet1bbdk8fhhxitywdj4ih",
-          "7n4ach3i53bbmj84dfmu5b7c1c",
-        ]
-      }
-    />
-    <MemoizedFormattedMessage
-      defaultMessage="{totalReplies, plural, =0 {Reply} =1 {# reply} other {# replies}}"
-      id="threading.numReplies"
-      values={
-        Object {
-          "totalReplies": 9,
-        }
-      }
-    />
-  </div>
-</div>
+</body>
 `;
 
 exports[`components/threading/global_threads/thread_item should report unread mentions 1`] = `
-<div
-  aria-label="Thread by Someone"
-  className="ThreadItem has-unreads"
-  id=""
-  onClick={[Function]}
-  onKeyDown={[Function]}
-  role="link"
-  tabIndex={0}
->
-  <header>
+<body>
+  <div>
     <div
-      className="indicator"
+      aria-describedby="ThreadItem__timestamp_1y8hpek81byspd4enyk9mp1ncw"
+      aria-label="Thread by Someone"
+      class="ThreadItem has-unreads"
+      id=""
+      role="link"
+      tabindex="0"
     >
       <div
-        className="dot-mentions"
+        class="thread-item-header"
       >
-        2
-      </div>
-    </div>
-    <div
-      className="ThreadItem__author"
-    >
-      Someone
-    </div>
-    <div
-      className="ThreadItem__tags"
-    >
-      <Memo(Tag)
-        onClick={[Function]}
-        text="Team name"
-      />
-    </div>
-    <MockTimestamp
-      className="alt-hidden"
-      day="numeric"
-      units={
-        Array [
-          "now",
-          "minute",
-          "hour",
-          "day",
-          "week",
-        ]
-      }
-      useTime={false}
-    />
-  </header>
-  <div
-    className="menu-anchor alt-visible"
-  >
-    <MockThreadMenu
-      hasUnreads={true}
-      isFollowing={true}
-      threadId="1y8hpek81byspd4enyk9mp1ncw"
-      unreadTimestamp={1611786714912}
-    >
-      <WithTooltip
-        title={
-          <Memo(MemoizedFormattedMessage)
-            defaultMessage="Actions"
-            id="threading.threadItem.menu"
-          />
-        }
-      >
-        <Memo(Button)
-          aria-label="Actions"
-          className="Button___icon"
-          marginTop={true}
+        <div
+          class="indicator"
         >
-          <DotsVerticalIcon
-            size={18}
-          />
-        </Memo(Button)>
-      </WithTooltip>
-    </MockThreadMenu>
+          <div
+            class="dot-mentions"
+          >
+            2
+          </div>
+        </div>
+        <div
+          class="ThreadItem__author"
+        >
+          Someone
+        </div>
+        <div
+          class="ThreadItem__tags"
+        >
+          <button
+            class="TagWrapper-kezsCu ftZQnc Tag Tag--xs"
+          >
+            <span
+              class="TagText-bWoQAI beIloY"
+            >
+              Team name
+            </span>
+          </button>
+        </div>
+        <span>
+          timestamp
+        </span>
+      </div>
+      <div
+        class="menu-anchor alt-visible"
+      >
+        <div
+          class="thread-menu"
+        />
+      </div>
+      <div
+        class="preview"
+        dir="auto"
+      >
+        <span>
+          test msg
+        </span>
+      </div>
+      <div
+        class="activity"
+      >
+        <div
+          class="avatars"
+        >
+          avatars
+        </div>
+        5 new replies
+      </div>
+      <span
+        class="sr-only"
+        id="ThreadItem__timestamp_1y8hpek81byspd4enyk9mp1ncw"
+      >
+        Last reply 
+        <span>
+          timestamp
+        </span>
+      </span>
+    </div>
   </div>
-  <div
-    className="preview"
-    dir="auto"
-    onClick={[Function]}
-    onKeyDown={[Function]}
-  >
-    <MockMarkdown
-      imageProps={
-        Object {
-          "onImageHeightChanged": [Function],
-          "onImageLoaded": [Function],
-        }
-      }
-      mentionKeys={Array []}
-      message="test msg"
-      options={
-        Object {
-          "atMentions": true,
-          "mentionHighlight": false,
-          "singleline": true,
-        }
-      }
-    />
-  </div>
-  <div
-    className="activity"
-  >
-    <MockAvatars
-      size="xs"
-      userIds={
-        Array [
-          "mt5td9mdriyapmwuh5pc84dmhr",
-          "ij61jet1bbdk8fhhxitywdj4ih",
-          "7n4ach3i53bbmj84dfmu5b7c1c",
-        ]
-      }
-    />
-    <MemoizedFormattedMessage
-      defaultMessage="{newReplies, plural, =1 {# new reply} other {# new replies}}"
-      id="threading.numNewReplies"
-      values={
-        Object {
-          "newReplies": 5,
-        }
-      }
-    />
-  </div>
-</div>
+</body>
 `;
 
 exports[`components/threading/global_threads/thread_item should report unread messages 1`] = `
-<div
-  aria-label="Thread by Someone"
-  className="ThreadItem has-unreads"
-  id=""
-  onClick={[Function]}
-  onKeyDown={[Function]}
-  role="link"
-  tabIndex={0}
->
-  <header>
+<body>
+  <div>
     <div
-      className="indicator"
+      aria-describedby="ThreadItem__timestamp_1y8hpek81byspd4enyk9mp1ncw"
+      aria-label="Thread by Someone"
+      class="ThreadItem has-unreads"
+      id=""
+      role="link"
+      tabindex="0"
     >
       <div
-        className="dot-unreads"
-      />
-    </div>
-    <div
-      className="ThreadItem__author"
-    >
-      Someone
-    </div>
-    <div
-      className="ThreadItem__tags"
-    >
-      <Memo(Tag)
-        onClick={[Function]}
-        text="Team name"
-      />
-    </div>
-    <MockTimestamp
-      className="alt-hidden"
-      day="numeric"
-      units={
-        Array [
-          "now",
-          "minute",
-          "hour",
-          "day",
-          "week",
-        ]
-      }
-      useTime={false}
-    />
-  </header>
-  <div
-    className="menu-anchor alt-visible"
-  >
-    <MockThreadMenu
-      hasUnreads={true}
-      isFollowing={true}
-      threadId="1y8hpek81byspd4enyk9mp1ncw"
-      unreadTimestamp={1611786714912}
-    >
-      <WithTooltip
-        title={
-          <Memo(MemoizedFormattedMessage)
-            defaultMessage="Actions"
-            id="threading.threadItem.menu"
-          />
-        }
+        class="thread-item-header"
       >
-        <Memo(Button)
-          aria-label="Actions"
-          className="Button___icon"
-          marginTop={true}
+        <div
+          class="indicator"
         >
-          <DotsVerticalIcon
-            size={18}
+          <div
+            class="dot-unreads"
           />
-        </Memo(Button)>
-      </WithTooltip>
-    </MockThreadMenu>
+        </div>
+        <div
+          class="ThreadItem__author"
+        >
+          Someone
+        </div>
+        <div
+          class="ThreadItem__tags"
+        >
+          <button
+            class="TagWrapper-kezsCu ftZQnc Tag Tag--xs"
+          >
+            <span
+              class="TagText-bWoQAI beIloY"
+            >
+              Team name
+            </span>
+          </button>
+        </div>
+        <span>
+          timestamp
+        </span>
+      </div>
+      <div
+        class="menu-anchor alt-visible"
+      >
+        <div
+          class="thread-menu"
+        />
+      </div>
+      <div
+        class="preview"
+        dir="auto"
+      >
+        <span>
+          test msg
+        </span>
+      </div>
+      <div
+        class="activity"
+      >
+        <div
+          class="avatars"
+        >
+          avatars
+        </div>
+        2 new replies
+      </div>
+      <span
+        class="sr-only"
+        id="ThreadItem__timestamp_1y8hpek81byspd4enyk9mp1ncw"
+      >
+        Last reply 
+        <span>
+          timestamp
+        </span>
+      </span>
+    </div>
   </div>
-  <div
-    className="preview"
-    dir="auto"
-    onClick={[Function]}
-    onKeyDown={[Function]}
-  >
-    <MockMarkdown
-      imageProps={
-        Object {
-          "onImageHeightChanged": [Function],
-          "onImageLoaded": [Function],
-        }
-      }
-      mentionKeys={Array []}
-      message="test msg"
-      options={
-        Object {
-          "atMentions": true,
-          "mentionHighlight": false,
-          "singleline": true,
-        }
-      }
-    />
-  </div>
-  <div
-    className="activity"
-  >
-    <MockAvatars
-      size="xs"
-      userIds={
-        Array [
-          "mt5td9mdriyapmwuh5pc84dmhr",
-          "ij61jet1bbdk8fhhxitywdj4ih",
-          "7n4ach3i53bbmj84dfmu5b7c1c",
-        ]
-      }
-    />
-    <MemoizedFormattedMessage
-      defaultMessage="{newReplies, plural, =1 {# new reply} other {# new replies}}"
-      id="threading.numNewReplies"
-      values={
-        Object {
-          "newReplies": 2,
-        }
-      }
-    />
-  </div>
-</div>
+</body>
 `;

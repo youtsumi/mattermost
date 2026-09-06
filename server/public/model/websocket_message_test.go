@@ -129,24 +129,24 @@ var stringSink []byte
 
 func BenchmarkWebSocketEvent_ToJSON(b *testing.B) {
 	event := NewWebSocketEvent(WebsocketEventPosted, "foo", "bar", "baz", nil, "")
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		event.GetData()[NewId()] = NewId()
 	}
 
 	b.Run("SerializedNTimes", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			stringSink, _ = event.ToJSON()
 		}
 	})
 
 	b.Run("PrecomputedNTimes", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			event.PrecomputeJSON()
 		}
 	})
 
 	b.Run("PrecomputedAndSerializedNTimes", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			event.PrecomputeJSON()
 			stringSink, _ = event.ToJSON()
 		}
@@ -154,7 +154,7 @@ func BenchmarkWebSocketEvent_ToJSON(b *testing.B) {
 
 	event.PrecomputeJSON()
 	b.Run("PrecomputedOnceAndSerializedNTimes", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			stringSink, _ = event.ToJSON()
 		}
 	})
@@ -178,8 +178,11 @@ func TestWebsocketBroadcastCopy(t *testing.T) {
 		TeamId:                "ccc",
 		ContainsSanitizedData: true,
 		ContainsSensitiveData: true,
+		RequiredPermissions:   []string{PermissionReadDataRetentionJob.Id},
 	}
-	require.Equal(t, w, w.copy())
+	wCopy := w.copy()
+	require.Equal(t, w, wCopy)
+	require.NotSame(t, &w.RequiredPermissions[0], &wCopy.RequiredPermissions[0])
 }
 
 func TestPrecomputedWebSocketEventJSONCopy(t *testing.T) {
@@ -217,19 +220,21 @@ func TestWebSocketEventDeepCopy(t *testing.T) {
 		TeamId:                "ccc",
 		ContainsSanitizedData: true,
 		ContainsSensitiveData: true,
+		RequiredPermissions:   []string{PermissionReadDataRetentionJob.Id},
 		OmitConnectionId:      "ddd",
 	}
 
 	ev := NewWebSocketEvent("test", "team", "channel", "user", omitUsers, "ddd")
 
 	ev.Add("post", &Post{})
-	ev.SetBroadcast(broadcast)
+	ev = ev.SetBroadcast(broadcast)
 	ev = ev.PrecomputeJSON()
 
 	evCopy := ev.DeepCopy()
 	require.Equal(t, ev, evCopy)
-	require.NotSame(t, &ev.data, &evCopy.data)
+	AssertNotSameMap(t, ev.data, evCopy.data)
 	require.NotSame(t, ev.broadcast, evCopy.broadcast)
+	require.NotSame(t, &ev.broadcast.RequiredPermissions[0], &evCopy.broadcast.RequiredPermissions[0])
 	require.NotSame(t, ev.precomputedJSON, evCopy.precomputedJSON)
 
 	ev.Add("post", &Post{
@@ -249,7 +254,7 @@ func BenchmarkEncodeJSON(b *testing.B) {
 
 	var seq int64
 	enc := json.NewEncoder(io.Discard)
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		ev = ev.SetSequence(seq)
 		err = ev.Encode(enc, io.Discard)
 		seq++

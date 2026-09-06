@@ -47,7 +47,6 @@ function mapStateToProps(state: GlobalState, ownProps: Props) {
     const {post} = ownProps;
 
     const systemMessage = isSystemMessage(post);
-
     const apps = appsEnabled(state);
     const showBindings = apps && !systemMessage && !isCombinedUserActivityPost(post.id);
     let appBindings: AppBinding[] | null = emptyBindings;

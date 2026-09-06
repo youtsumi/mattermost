@@ -46,7 +46,7 @@ const SearchTypeItem = styled.button<SearchTypeItemProps>`
 type Props = {
     searchType: string;
     setSearchType: (searchType: string) => void;
-}
+};
 
 const SearchTypeSelector = ({searchType, setSearchType}: Props) => {
     const setMessagesSearchType = useCallback(() => setSearchType('messages'), [setSearchType]);
@@ -55,10 +55,13 @@ const SearchTypeSelector = ({searchType, setSearchType}: Props) => {
     const searchPluginButtons = useSelector(getSearchButtons);
 
     return (
-        <SearchTypeSelectorContainer>
+        <SearchTypeSelectorContainer
+            role='radiogroup'
+        >
             <SearchTypeItem
                 selected={searchType === 'messages'}
                 onClick={setMessagesSearchType}
+                role='radio'
             >
                 <FormattedMessage
                     id='search_bar.usage.search_type_messages'
@@ -68,6 +71,7 @@ const SearchTypeSelector = ({searchType, setSearchType}: Props) => {
             <SearchTypeItem
                 selected={searchType === 'files'}
                 onClick={setFilesSearchType}
+                role='radio'
             >
                 <FormattedMessage
                     id='search_bar.usage.search_type_files'
@@ -81,8 +85,9 @@ const SearchTypeSelector = ({searchType, setSearchType}: Props) => {
                         key={pluginId}
                         selected={searchType === pluginId}
                         onClick={() => setSearchType(pluginId)}
+                        role='radio'
                     >
-                        <ErrorBoundary>
+                        <ErrorBoundary pluginId={pluginId}>
                             <Component/>
                         </ErrorBoundary>
                     </SearchTypeItem>

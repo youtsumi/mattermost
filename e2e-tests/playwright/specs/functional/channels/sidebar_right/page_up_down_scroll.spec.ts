@@ -1,7 +1,7 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import {Page} from '@playwright/test';
+import type {Page} from '@playwright/test';
 
 import {expect, test} from '@mattermost/playwright-lib';
 
@@ -13,8 +13,8 @@ test('should be able to scroll the RHS with page up and down', async ({pw}) => {
     await channelsPage.toBeVisible();
 
     await channelsPage.centerView.postCreate.postMessage('post');
-    const lastPost = await channelsPage.centerView.getLastPost();
-    await lastPost.openRhs();
+    const lastPost = await channelsPage.getLastPost();
+    await lastPost.reply();
 
     for (let i = 0; i < 10; i++) {
         await channelsPage.sidebarRight.postCreate.postMessage('a\n'.repeat(10));

@@ -1,7 +1,7 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import {ChainableT} from '../../types';
+import type {ChainableT} from '../../types';
 
 Cypress.Commands.add('uiGetLHS', () => {
     return cy.get('#SidebarContainer').should('be.visible');
@@ -139,7 +139,7 @@ Cypress.Commands.add('uiClickSidebarItem', (name) => {
         });
         cy.get('#tutorial-threads-mobile-header span.Button_label').contains('Followed threads');
     } else {
-        cy.findAllByTestId('postView').should('be.visible');
+        cy.findAllByTestId('postView').last().scrollIntoView().should('be.visible');
     }
 });
 

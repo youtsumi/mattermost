@@ -2,9 +2,10 @@
 // See LICENSE.txt for license information.
 
 import React, {useEffect, useState} from 'react';
-import type {ReactNode} from 'react';
 import {FormattedMessage, useIntl} from 'react-intl';
 import {useDispatch, useSelector} from 'react-redux';
+
+import {Button} from '@mattermost/shared/components/button';
 
 import {savePreferences} from 'mattermost-redux/actions/preferences';
 import {getBool as getBoolPreference} from 'mattermost-redux/selectors/entities/preferences';
@@ -12,7 +13,6 @@ import {getCurrentUserId} from 'mattermost-redux/selectors/entities/users';
 
 import AlertBanner from 'components/alert_banner';
 import withOpenStartTrialFormModal from 'components/common/hocs/cloud/with_open_start_trial_form_modal';
-import type {TelemetryProps} from 'components/common/hooks/useOpenPricingModal';
 import ExternalLink from 'components/external_link';
 import LoadingWrapper from 'components/widgets/loading/loading_wrapper';
 
@@ -31,13 +31,14 @@ interface TrialBannerProps {
     handleUpgrade: () => Promise<void>;
     upgradeError: string | null;
     restartError: string | null;
-    openTrialForm?: (telemetryProps?: TelemetryProps) => void;
+    openTrialForm?: () => void;
 
     handleRestart: () => Promise<void>;
 
     openEEModal: () => void;
 
     restarting: boolean;
+    upgradeDisabled: boolean;
 }
 
 export const EmbargoedEntityTrialError = () => {
@@ -46,7 +47,7 @@ export const EmbargoedEntityTrialError = () => {
             id='admin.license.trial-request.embargoed'
             defaultMessage='We were unable to process the request due to limitations for embargoed countries. <link>Learn more in our documentation</link>, or reach out to legal@mattermost.com for questions around export limitations.'
             values={{
-                link: (text: string) => (
+                link: (text) => (
                     <ExternalLink
                         location='trial_banner'
                         href={LicenseLinks.EMBARGOED_COUNTRIES}
@@ -81,6 +82,7 @@ const TrialBanner = ({
     restarting,
     openEEModal,
     openTrialForm,
+    upgradeDisabled,
 }: TrialBannerProps) => {
     let trialButton;
     let upgradeTermsMessage;
@@ -107,13 +109,13 @@ const TrialBanner = ({
         case TrialLoadStatus.Failed:
             return formatMessage({id: 'start_trial.modal.failed', defaultMessage: 'Failed'});
         case TrialLoadStatus.Embargoed:
-            return formatMessage<ReactNode>(
+            return formatMessage(
                 {
                     id: 'admin.license.trial-request.embargoed',
                     defaultMessage: 'We were unable to process the request due to limitations for embargoed countries. <link>Learn more in our documentation</link>, or reach out to legal@mattermost.com for questions around export limitations.',
                 },
                 {
-                    link: (text: string) => (
+                    link: (text) => (
                         <ExternalLink
                             location='trial_banner'
                             href={LicenseLinks.EMBARGOED_COUNTRIES}
@@ -130,7 +132,7 @@ const TrialBanner = ({
 
     const handleRequestLicense = () => {
         if (openTrialForm) {
-            openTrialForm({trackingLocation: 'license_settings.trial_banner'});
+            openTrialForm();
         }
     };
 
@@ -225,20 +227,20 @@ const TrialBanner = ({
                 );
         }
         trialButton = (
-            <button
+            <Button
                 type='button'
-                className='btn btn-primary'
+                emphasis='primary'
                 onClick={handleRequestLicense}
                 disabled={isDisabled || gettingTrialError !== null || gettingTrialResponseCode === 451}
             >
                 {btnText(status)}
-            </button>
+            </Button>
         );
         content = (
             <>
                 <FormattedMessage
                     id='admin.license.trial-request.title'
-                    defaultMessage='Experience Mattermost Enterprise Edition for free for the next 30 days. No obligation to buy or credit card required. '
+                    defaultMessage='Experience all that Mattermost Enterprise Advanced has to offer with a free trial for the next 30 days. No obligation to buy and no credit card required. '
                 />
                 <FormattedMessage
                     id='admin.license.trial-request.accept-terms'
@@ -266,13 +268,44 @@ const TrialBanner = ({
             </>
         );
         upgradeTermsMessage = null;
+    } else if (upgradeDisabled) {
+        content = (
+            <>
+                <FormattedMessage
+                    id='admin.license.upgrade-and-trial-request.title'
+                    defaultMessage='Upgrade to the Enterprise Edition to unlock a free 30-day trial of Mattermost Enterprise Advanced—our most powerful plan. No credit card required, no obligation to buy. '
+                />
+            </>
+        );
+        upgradeTermsMessage = (
+            <div className='upgrade-error unsupported'>
+                <div className='form-group has-error'>
+                    <div className='as-bs-label control-label'>
+                        <FormattedMessage
+                            id='admin.trial_banner.upgrade_unsupported'
+                            defaultMessage='Quick upgrade is only supported on Linux systems with x86-64 architecture. <link>Learn how to upgrade manually.</link>'
+                            values={{
+                                link: (msg: React.ReactNode) => (
+                                    <ExternalLink
+                                        location='trial_banner'
+                                        href={LicenseLinks.UNSUPPORTED_UPGRADE_LINK}
+                                    >
+                                        {msg}
+                                    </ExternalLink>
+                                ),
+                            }}
+                        />
+                    </div>
+                </div>
+            </div>
+        );
     } else {
         gettingTrialErrorMsg = null;
         trialButton = (
-            <button
+            <Button
                 type='button'
                 onClick={onHandleUpgrade}
-                className='btn btn-primary'
+                emphasis='primary'
             >
                 <LoadingWrapper
                     loading={upgradingPercentage > 0}
@@ -293,14 +326,14 @@ const TrialBanner = ({
                         defaultMessage='Upgrade Server And Start trial'
                     />
                 </LoadingWrapper>
-            </button>
+            </Button>
         );
 
         content = (
             <>
                 <FormattedMessage
                     id='admin.license.upgrade-and-trial-request.title'
-                    defaultMessage='Upgrade to Enterprise Edition and Experience Mattermost Enterprise Edition for free for the next 30 days. No obligation to buy or credit card required. '
+                    defaultMessage='Upgrade to the Enterprise Edition to unlock a free 30-day trial of Mattermost Enterprise Advanced—our most powerful plan. No credit card required, no obligation to buy. '
                 />
             </>
         );
@@ -310,7 +343,7 @@ const TrialBanner = ({
                 <p className='upgrade-legal-terms'>
                     <FormattedMessage
                         id='admin.license.upgrade-and-trial-request.accept-terms-initial-part'
-                        defaultMessage='By selecting <strong>Upgrade Server And Start trial</strong>, I agree to the <linkEvaluation>Mattermost Software and Services License Agreement</linkEvaluation>, <linkPrivacy>Privacy Policy</linkPrivacy>, and receiving product emails. '
+                        defaultMessage='By selecting <strong>Upgrade Server And Start trial</strong>, I agree to the <linkEvaluation>Mattermost Software Evaluation Agreement</linkEvaluation>, <linkPrivacy>Privacy Policy</linkPrivacy>, and receiving product emails. '
                         values={{
                             strong: (msg: React.ReactNode) => <strong>{msg}</strong>,
                             linkEvaluation: (msg: React.ReactNode) => (
@@ -367,7 +400,7 @@ const TrialBanner = ({
             title={
                 <FormattedMessage
                     id='licensingPage.infoBanner.startTrialTitle'
-                    defaultMessage='Free 30 day trial!'
+                    defaultMessage='Start a free 30-day trial of Mattermost Enterprise Advanced'
                 />
             }
             message={

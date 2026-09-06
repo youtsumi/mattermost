@@ -13,7 +13,7 @@ import (
 )
 
 func (s *MmctlE2ETestSuite) TestAssignUsersCmd() {
-	s.SetupEnterpriseTestHelper().InitBasic()
+	s.SetupEnterpriseTestHelper().InitBasic(s.T())
 
 	user, appErr := s.th.App.CreateUser(s.th.Context, &model.User{Email: s.th.GenerateTestEmail(), Username: model.NewUsername(), Password: model.NewId()})
 	s.Require().Nil(appErr)
@@ -56,7 +56,7 @@ func (s *MmctlE2ETestSuite) TestAssignUsersCmd() {
 
 		roles := user.Roles
 
-		u, err2 := s.th.App.GetUser(user.Id)
+		u, err2 := s.th.App.GetUser(s.th.Context, user.Id)
 		s.Require().Nil(err2)
 		s.Require().True(u.IsInRole(model.SystemManagerRoleId))
 
@@ -66,7 +66,7 @@ func (s *MmctlE2ETestSuite) TestAssignUsersCmd() {
 }
 
 func (s *MmctlE2ETestSuite) TestUnassignUsersCmd() {
-	s.SetupEnterpriseTestHelper().InitBasic()
+	s.SetupEnterpriseTestHelper().InitBasic(s.T())
 
 	user, appErr := s.th.App.CreateUser(s.th.Context, &model.User{Email: s.th.GenerateTestEmail(), Username: model.NewUsername(), Password: model.NewId()})
 	s.Require().Nil(appErr)
@@ -97,7 +97,7 @@ func (s *MmctlE2ETestSuite) TestUnassignUsersCmd() {
 		s.Require().Len(printer.GetLines(), 0)
 		s.Require().Len(printer.GetErrorLines(), 0)
 
-		u, err2 := s.th.App.GetUser(user.Id)
+		u, err2 := s.th.App.GetUser(s.th.Context, user.Id)
 		s.Require().Nil(err2)
 		s.Require().False(u.IsInRole(model.SystemManagerRoleId))
 	})

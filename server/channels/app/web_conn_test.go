@@ -4,7 +4,6 @@
 package app
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -19,10 +18,10 @@ import (
 // happen inside web_hub.go before the event is actually broadcasted, and checked
 // via ShouldSendEvent.
 func TestWebConnShouldSendEvent(t *testing.T) {
-	os.Setenv("MM_FEATUREFLAGS_WEBSOCKETEVENTSCOPE", "true")
-	defer os.Unsetenv("MM_FEATUREFLAGS_WEBSOCKETEVENTSCOPE")
-	th := Setup(t).InitBasic()
-	defer th.TearDown()
+	mainHelper.Parallel(t)
+
+	th := Setup(t).InitBasic(t)
+
 	session, err := th.App.CreateSession(th.Context, &model.Session{UserId: th.BasicUser.Id, Roles: th.BasicUser.GetRawRoles(), TeamMembers: []*model.TeamMember{
 		{
 			UserId: th.BasicUser.Id,
@@ -45,7 +44,13 @@ func TestWebConnShouldSendEvent(t *testing.T) {
 	basicUserWc.SetSessionToken(session.Token)
 	basicUserWc.SetSessionExpiresAt(session.ExpiresAt)
 
-	session2, err := th.App.CreateSession(th.Context, &model.Session{UserId: th.BasicUser2.Id, Roles: th.BasicUser2.GetRawRoles(), TeamMembers: []*model.TeamMember{
+	role, appErr := th.App.GetRoleByName(RequestContextWithMaster(th.Context), model.SystemManagerRoleId)
+	require.Nil(t, appErr)
+	role.Permissions = append(role.Permissions, model.PermissionReadDataRetentionJob.Id)
+	_, appErr = th.App.UpdateRole(role)
+	require.Nil(t, appErr)
+
+	session2, err := th.App.CreateSession(th.Context, &model.Session{UserId: th.BasicUser2.Id, Roles: model.SystemUserRoleId + " " + model.SystemManagerRoleId, TeamMembers: []*model.TeamMember{
 		{
 			UserId: th.BasicUser2.Id,
 			TeamId: th.BasicTeam.Id,
@@ -106,11 +111,11 @@ func TestWebConnShouldSendEvent(t *testing.T) {
 	basicUserWc2.SetSessionExpiresAt(session4.ExpiresAt)
 
 	// By default, only BasicUser and BasicUser2 get added to the BasicTeam.
-	th.LinkUserToTeam(th.SystemAdminUser, th.BasicTeam)
+	th.LinkUserToTeam(t, th.SystemAdminUser, th.BasicTeam)
 
 	// Create another channel with just BasicUser (implicitly) and SystemAdminUser to test channel broadcast
-	channel2 := th.CreateChannel(th.Context, th.BasicTeam)
-	th.AddUserToChannel(th.SystemAdminUser, channel2)
+	channel2 := th.CreateChannel(t, th.BasicTeam)
+	th.AddUserToChannel(t, th.SystemAdminUser, channel2)
 
 	cases := []struct {
 		Description        string
@@ -126,6 +131,10 @@ func TestWebConnShouldSendEvent(t *testing.T) {
 		{"should only send to basic user conn 2", &model.WebsocketBroadcast{ConnectionId: user1Conn2ID}, false, false, false, true},
 		{"should omit basic user 2", &model.WebsocketBroadcast{OmitUsers: map[string]bool{th.BasicUser2.Id: true}}, true, false, true, true},
 		{"should only send to admin", &model.WebsocketBroadcast{ContainsSensitiveData: true}, false, false, true, false},
+		{"should only send to users with required permission", &model.WebsocketBroadcast{RequiredPermissions: []string{model.PermissionReadDataRetentionJob.Id}}, false, true, true, false},
+		{"should require all permissions", &model.WebsocketBroadcast{RequiredPermissions: []string{model.PermissionReadDataRetentionJob.Id, model.PermissionReadComplianceExportJob.Id}}, false, false, true, false},
+		{"should treat manage_system as a required permission", &model.WebsocketBroadcast{RequiredPermissions: []string{model.PermissionManageSystem.Id}}, false, false, true, false},
+		{"required permissions take precedence over sensitive data fallback", &model.WebsocketBroadcast{ContainsSensitiveData: true, RequiredPermissions: []string{model.PermissionReadDataRetentionJob.Id}}, false, true, true, false},
 		{"should only send to non-admins", &model.WebsocketBroadcast{ContainsSanitizedData: true}, true, true, false, true},
 		{"should send to nobody", &model.WebsocketBroadcast{ContainsSensitiveData: true, ContainsSanitizedData: true}, false, false, false, false},
 		{"should omit basic user 2 by connection id", &model.WebsocketBroadcast{OmitConnectionId: user2ConnID}, true, false, true, true},
@@ -218,7 +227,7 @@ func TestWebConnShouldSendEvent(t *testing.T) {
 	})
 
 	t.Run("channel member cache invalidated after user added to channel", func(t *testing.T) {
-		th.AddUserToChannel(th.BasicUser2, channel2)
+		th.AddUserToChannel(t, th.BasicUser2, channel2)
 		basicUser2Wc.InvalidateCache()
 
 		event = event.SetBroadcast(&model.WebsocketBroadcast{ChannelId: channel2.Id})

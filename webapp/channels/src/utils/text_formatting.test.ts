@@ -90,6 +90,11 @@ describe('formatText', () => {
         }
     });
 
+    test('emoticons should not be rendered as emojis when renderEmoticonsAsEmoji is false', () => {
+        const output = formatText(':)', {renderEmoticonsAsEmoji: false}, emptyEmojiMap);
+        expect(output).toBe('<p>:)</p>');
+    });
+
     test('code blocks newlines are not converted into <br/> with inline markdown image in the post', () => {
         const output = formatText('```\nsome text\nsecond line\n```\n ![](https://example.com/image.png)', {}, emptyEmojiMap);
         expect(output).not.toContain('<br/>');
@@ -238,7 +243,7 @@ describe('highlightSearchTerms', () => {
 
         const output = highlightSearchTerms(text, tokens, searchPatterns);
         expect(output).toBe('$MM_SEARCHTERM1$');
-        expect(tokens.get('$MM_SEARCHTERM1$')!.value).toBe('<span class="search-highlight">$MM_HASHTAG0$</span>');
+        expect(tokens.get('$MM_SEARCHTERM1$')!.value).toBe('<span class="search-highlight" data-testid="search-highlight">$MM_HASHTAG0$</span>');
     });
 });
 
@@ -275,7 +280,7 @@ describe('handleUnicodeEmoji', () => {
         {
             description: 'should not replace unsupported emojis with an image',
             text: '😮‍💨', // Note, this test will fail as soon as this emoji gets a corresponding image
-            output: '<span class="emoticon emoticon--unicode">😮‍💨</span>',
+            output: '<span class="emoticon emoticon--unicode" data-testid="channel-banner-unicode-emoji">😮‍💨</span>',
         },
         {
             description: 'should correctly match gendered emojis',
@@ -313,7 +318,7 @@ describe('handleUnicodeEmoji', () => {
 
     test('without emojiMap, should work as unsupported emoji', () => {
         const output = handleUnicodeEmoji('👍', undefined as unknown as EmojiMap, UNICODE_EMOJI_REGEX);
-        expect(output).toBe('<span class="emoticon emoticon--unicode">👍</span>');
+        expect(output).toBe('<span class="emoticon emoticon--unicode" data-testid="channel-banner-unicode-emoji">👍</span>');
     });
 });
 

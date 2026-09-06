@@ -10,7 +10,7 @@
 // Stage: @prod
 // Group: @channels @accessibility
 
-import {getRandomId} from '../../../utils';
+import {getRandomId} from '@/utils';
 
 function postMessages(testChannel, otherUser, count) {
     for (let index = 0; index < count; index++) {
@@ -126,7 +126,7 @@ describe('Verify Quick Navigation support across different regions in the app', 
     it('MM-T1460_8 Verify Navigation Support in Search Results', () => {
         // # Search for some text
         cy.uiGetSearchContainer().click();
-        cy.uiGetSearchBox().should('be.visible').first().type('hello {enter}');
+        cy.uiGetSearchBox().should('be.visible').type('hello {enter}');
 
         // # Change the focus to search results
         cy.get('#searchContainer').within(() => {

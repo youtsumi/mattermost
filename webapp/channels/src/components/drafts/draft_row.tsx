@@ -9,12 +9,14 @@ import {useHistory} from 'react-router-dom';
 
 import type {ServerError} from '@mattermost/types/errors';
 import type {FileInfo} from '@mattermost/types/files';
-import type {ScheduledPost} from '@mattermost/types/schedule_post';
+import {isRecurringScheduledPost} from '@mattermost/types/schedule_post';
+import type {SchedulingInfo, ScheduledPost} from '@mattermost/types/schedule_post';
 import type {UserProfile, UserStatus} from '@mattermost/types/users';
 
 import {getPost as getPostAction} from 'mattermost-redux/actions/posts';
 import {deleteScheduledPost, updateScheduledPost} from 'mattermost-redux/actions/scheduled_posts';
 import {Permissions} from 'mattermost-redux/constants';
+import {PostTypes} from 'mattermost-redux/constants/posts';
 import {isDeactivatedDirectChannel, makeGetChannel} from 'mattermost-redux/selectors/entities/channels';
 import {getConfig} from 'mattermost-redux/selectors/entities/general';
 import {getPost} from 'mattermost-redux/selectors/entities/posts';
@@ -25,12 +27,12 @@ import {makeGetThreadOrSynthetic} from 'mattermost-redux/selectors/entities/thre
 import type {SubmitPostReturnType} from 'actions/views/create_comment';
 import {removeDraft} from 'actions/views/drafts';
 import {selectPostById} from 'actions/views/rhs';
+import {getBurnOnReadDurationMinutes} from 'selectors/burn_on_read';
 import {getConnectionId} from 'selectors/general';
 import {getChannelURL} from 'selectors/urls';
 
 import usePriority from 'components/advanced_text_editor/use_priority';
 import useSubmit from 'components/advanced_text_editor/use_submit';
-import {useScrollOnRender} from 'components/common/hooks/use_scroll_on_render';
 import ScheduledPostActions from 'components/drafts/draft_actions/schedule_post_actions/scheduled_post_actions';
 import PlaceholderScheduledPostsTitle
     from 'components/drafts/placeholder_scheduled_post_title/placeholder_scheduled_posts_title';
@@ -41,7 +43,7 @@ import {copyToClipboard} from 'utils/utils';
 
 import type {GlobalState} from 'types/store';
 import type {PostDraft} from 'types/store/draft';
-import {scheduledPostToPostDraft} from 'types/store/draft';
+import {draftHasAttachments, scheduledPostToPostDraft} from 'types/store/draft';
 
 import DraftActions from './draft_actions';
 import DraftTitle from './draft_title';
@@ -56,9 +58,9 @@ type Props = {
     displayName: string;
     item: PostDraft | ScheduledPost;
     isRemote?: boolean;
-    scrollIntoView?: boolean;
+    highlight?: boolean;
     containerClassName?: string;
-}
+};
 
 const mockLastBlurAt = {current: 0};
 
@@ -68,18 +70,19 @@ function DraftRow({
     status,
     displayName,
     isRemote,
-    scrollIntoView,
+    highlight,
     containerClassName,
 }: Props) {
     const [isEditing, setIsEditing] = useState(false);
 
     const isScheduledPost = 'scheduled_at' in item;
+    const isWeeklyRecurringScheduledPost = isScheduledPost && isRecurringScheduledPost(item);
     const intl = useIntl();
 
     const rootId = ('rootId' in item) ? item.rootId : item.root_id;
     const channelId = ('channelId' in item) ? item.channelId : item.channel_id;
 
-    const [serverError, setServerError] = useState<(ServerError & { submittedMessage?: string }) | null>(null);
+    const [serverError, setServerError] = useState<(ServerError & {submittedMessage?: string}) | null>(null);
 
     const history = useHistory();
     const dispatch = useDispatch();
@@ -107,6 +110,7 @@ function DraftRow({
     });
 
     const connectionId = useSelector(getConnectionId);
+    const burnOnReadDurationMinutes = useSelector(getBurnOnReadDurationMinutes);
 
     const isChannelArchived = Boolean(channel?.delete_at);
     const isDeactivatedDM = useSelector((state: GlobalState) => isDeactivatedDirectChannel(state, channelId));
@@ -211,14 +215,14 @@ function DraftRow({
         true,
     );
 
-    const onScheduleDraft = useCallback(async (scheduledAt: number): Promise<{error?: string}> => {
+    const onScheduleDraft = useCallback(async (schedulingInfo: SchedulingInfo): Promise<{error?: string}> => {
         isBeingScheduled.current = true;
-        await handleOnSend(item as PostDraft, {scheduled_at: scheduledAt});
+        await handleOnSend(item as PostDraft, schedulingInfo);
         return Promise.resolve({});
     }, [item, handleOnSend]);
 
     const draftActions = useMemo(() => {
-        if (!channel) {
+        if (!channel || isScheduledPost) {
             return null;
         }
         return (
@@ -234,6 +238,7 @@ function DraftRow({
                 canEdit={canEdit}
                 canSend={canSend}
                 onSchedule={onScheduleDraft}
+                allowRecurring={!draftHasAttachments(item)}
             />
         );
     }, [
@@ -243,6 +248,8 @@ function DraftRow({
         goToMessage,
         handleOnDelete,
         handleOnSend,
+        isScheduledPost,
+        item,
         user.id,
         onScheduleDraft,
     ]);
@@ -251,12 +258,14 @@ function DraftRow({
         setIsEditing(false);
     }, []);
 
-    const handleSchedulePostOnReschedule = useCallback(async (updatedScheduledAtTime: number) => {
+    const handleSchedulePostOnReschedule = useCallback(async (schedulingInfo: SchedulingInfo) => {
         handleCancelEdit();
 
         const updatedScheduledPost: ScheduledPost = {
             ...(item as ScheduledPost),
-            scheduled_at: updatedScheduledAtTime,
+            scheduled_at: schedulingInfo.scheduled_at,
+            repeat_type: schedulingInfo.repeat_type,
+            repeat_timezone: schedulingInfo.repeat_timezone,
         };
 
         const result = await dispatch(updateScheduledPost(updatedScheduledPost, connectionId));
@@ -320,8 +329,6 @@ function DraftRow({
         }
     }, [thread?.id, rootId]);
 
-    const alertRef = useScrollOnRender();
-
     if (!channel && !isScheduledPost) {
         return null;
     }
@@ -343,6 +350,10 @@ function DraftRow({
         actions = draftActions;
     }
 
+    // Both PostDraft and ScheduledPost have a type field (ScheduledPost extends Draft which has type)
+    const itemType = (item as PostDraft | ScheduledPost).type;
+    const draftBurnOnReadMetadata = !rootId && itemType === PostTypes.BURN_ON_READ ? {enabled: true} : undefined;
+
     let title: React.ReactNode;
     if (channel) {
         title = (
@@ -360,47 +371,59 @@ function DraftRow({
         );
     }
 
+    const kind = isScheduledPost ? 'scheduledPost' : 'draft';
+
     return (
         <Panel
+            dataTestId={`${kind}View`}
+            dataPostId={(item as ScheduledPost).id}
             onClick={goToMessage}
             hasError={Boolean(postError)}
-            innerRef={scrollIntoView ? alertRef : undefined}
-            isHighlighted={scrollIntoView}
+            isHighlighted={highlight}
             className={containerClassName}
+            ariaLabel={isScheduledPost ? intl.formatMessage({
+                id: 'drafts.draft_row.aria_label.scheduled_post',
+                defaultMessage: 'scheduled post in {channelName}',
+            }, {
+                channelName: channel?.display_name,
+            }) : intl.formatMessage({
+                id: 'drafts.draft_row.aria_label.draft',
+                defaultMessage: 'draft in {channelName}',
+            }, {
+                channelName: channel?.display_name,
+            })}
         >
-            {({hover}) => (
-                <>
-                    <Header
-                        kind={isScheduledPost ? 'scheduledPost' : 'draft'}
-                        hover={hover}
-                        actions={actions}
-                        title={title}
-                        timestamp={timestamp}
-                        remote={isRemote || false}
-                        error={postError || serverError?.message}
-                    />
-                    {isEditing && (
-                        <EditScheduledPost
-                            scheduledPost={item as ScheduledPost}
-                            onCancel={handleCancelEdit}
-                            afterSave={handleCancelEdit}
-                            onDeleteScheduledPost={handleSchedulePostOnDelete}
-                        />
-                    )}
-                    {!isEditing && (
-                        <PanelBody
-                            channelId={channel?.id}
-                            displayName={displayName}
-                            fileInfos={fileInfos}
-                            message={item.message}
-                            status={status}
-                            priority={rootId ? undefined : item.metadata?.priority}
-                            uploadsInProgress={uploadsInProgress}
-                            userId={user.id}
-                            username={user.username}
-                        />
-                    )}
-                </>
+            <Header
+                kind={kind}
+                actions={actions}
+                title={title}
+                timestamp={timestamp}
+                remote={isRemote || false}
+                error={postError || serverError?.message}
+                repeatsWeekly={isWeeklyRecurringScheduledPost}
+            />
+            {isEditing && (
+                <EditScheduledPost
+                    scheduledPost={item as ScheduledPost}
+                    onCancel={handleCancelEdit}
+                    afterSave={handleCancelEdit}
+                    onDeleteScheduledPost={handleSchedulePostOnDelete}
+                />
+            )}
+            {!isEditing && (
+                <PanelBody
+                    channelId={channel?.id}
+                    displayName={displayName}
+                    fileInfos={fileInfos}
+                    message={item.message}
+                    status={status}
+                    priority={rootId ? undefined : item.metadata?.priority}
+                    burnOnRead={draftBurnOnReadMetadata}
+                    burnOnReadDurationMinutes={burnOnReadDurationMinutes}
+                    uploadsInProgress={uploadsInProgress}
+                    userId={user.id}
+                    username={user.username}
+                />
             )}
         </Panel>
     );

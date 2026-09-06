@@ -5,7 +5,6 @@ package app
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -85,8 +84,8 @@ func (a *App) importScheme(rctx request.CTX, data *imports.SchemeImportData, dry
 
 		if data.DefaultTeamGuestRole == nil {
 			data.DefaultTeamGuestRole = &imports.RoleImportData{
-				DisplayName:   model.NewPointer("Team Guest Role for Scheme"),
-				SchemeManaged: model.NewPointer(true),
+				DisplayName:   new("Team Guest Role for Scheme"),
+				SchemeManaged: new(true),
 			}
 		}
 		data.DefaultTeamGuestRole.Name = &scheme.DefaultTeamGuestRole
@@ -108,8 +107,8 @@ func (a *App) importScheme(rctx request.CTX, data *imports.SchemeImportData, dry
 
 		if data.DefaultChannelGuestRole == nil {
 			data.DefaultChannelGuestRole = &imports.RoleImportData{
-				DisplayName:   model.NewPointer("Channel Guest Role for Scheme"),
-				SchemeManaged: model.NewPointer(true),
+				DisplayName:   new("Channel Guest Role for Scheme"),
+				SchemeManaged: new(true),
 			}
 		}
 		data.DefaultChannelGuestRole.Name = &scheme.DefaultChannelGuestRole
@@ -140,7 +139,7 @@ func (a *App) importRole(rctx request.CTX, data *imports.RoleImportData, dryRun 
 
 	rctx.Logger().Info("Importing role", fields...)
 
-	role, err := a.GetRoleByName(context.Background(), *data.Name)
+	role, err := a.GetRoleByName(rctx, *data.Name)
 	if err != nil {
 		role = new(model.Role)
 	}
@@ -193,7 +192,6 @@ func (a *App) importTeam(rctx request.CTX, data *imports.TeamImportData, dryRun 
 
 	var team *model.Team
 	team, err := a.Srv().Store().Team().GetByName(teamName)
-
 	if err != nil {
 		team = &model.Team{
 			Name: teamName,
@@ -595,7 +593,7 @@ func (a *App) importUser(rctx request.CTX, data *imports.UserImportData, dryRun 
 			if appErr = a.updateUserNotifyProps(user.Id, user.NotifyProps); appErr != nil {
 				return appErr
 			}
-			if savedUser, appErr = a.GetUser(user.Id); appErr != nil {
+			if savedUser, appErr = a.GetUser(rctx, user.Id); appErr != nil {
 				return appErr
 			}
 		}
@@ -618,7 +616,7 @@ func (a *App) importUser(rctx request.CTX, data *imports.UserImportData, dryRun 
 		}
 		if emailVerified {
 			if hasUserEmailVerifiedChanged {
-				if err := a.VerifyUserEmail(user.Id, user.Email); err != nil {
+				if err := a.VerifyUserEmail(rctx, user.Id, user.Email); err != nil {
 					return err
 				}
 			}
@@ -859,6 +857,10 @@ func (a *App) importBot(rctx request.CTX, data *imports.BotImportData, dryRun bo
 	var nErr error
 	bot, nErr = a.Srv().Store().Bot().GetByUsername(*data.Username)
 	if nErr != nil {
+		var nfErr *store.ErrNotFound
+		if !errors.As(nErr, &nfErr) {
+			return model.NewAppError("importBot", "app.import.import_bot.lookup_error", nil, "", http.StatusInternalServerError).Wrap(nErr)
+		}
 		bot = &model.Bot{}
 		hasBotChanged = true
 	}
@@ -896,18 +898,45 @@ func (a *App) importBot(rctx request.CTX, data *imports.BotImportData, dryRun bo
 	if bot.UserId == "" {
 		var appErr *model.AppError
 		if savedBot, appErr = a.CreateBot(rctx, bot); appErr != nil {
-			var appErr *model.AppError
+			// CreateBot failed — check if it's because the user already exists.
+			// CreateBot wraps store.ErrInvalidInput inside a *model.AppError when
+			// the username is taken, so we unwrap via errors.As to detect this case.
+			// This can happen when a user with this username was created (e.g. by a
+			// previous partial import) but has no bot record yet.
 			var invErr *store.ErrInvalidInput
-			switch {
-			case errors.As(appErr, &invErr):
-				switch invErr.Field {
-				case "username":
-					return model.NewAppError("importUser", "app.user.save.username_exists.app_error", nil, "", http.StatusBadRequest).Wrap(appErr)
-				default:
-					return model.NewAppError("importUser", "app.user.save.existing.app_error", nil, "", http.StatusBadRequest).Wrap(appErr)
-				}
-			default:
+			if !errors.As(appErr, &invErr) || invErr.Field != "username" {
 				return appErr
+			}
+
+			rctx.Logger().Info("CreateBot failed with username conflict during import, recovering by linking existing user",
+				mlog.String("bot_username", *data.Username))
+
+			// The user already exists; look it up and create only the bot record.
+			existingUser, userErr := a.Srv().Store().User().GetByUsername(*data.Username)
+			if userErr != nil {
+				return model.NewAppError("importBot", "app.import.import_bot.user_not_found.error", nil, "", http.StatusInternalServerError).Wrap(userErr)
+			}
+			bot.UserId = existingUser.Id
+
+			rctx.Logger().Info("Found existing user for bot import recovery",
+				mlog.String("bot_username", *data.Username),
+				mlog.String("user_id", existingUser.Id))
+
+			var saveErr error
+			savedBot, saveErr = a.Srv().Store().Bot().Save(bot)
+			if saveErr != nil {
+				// Bot().Save failed — this can happen if the bot record was
+				// concurrently created between the GetByUsername check at the
+				// top of this function and now (race condition). Fall back to
+				// updating the existing record.
+				rctx.Logger().Warn("Bot record save failed during import recovery, attempting update",
+					mlog.String("user_id", bot.UserId),
+					mlog.Err(saveErr))
+				var updateErr error
+				savedBot, updateErr = a.Srv().Store().Bot().Update(bot)
+				if updateErr != nil {
+					return model.NewAppError("importBot", "app.bot.update.internal_error", nil, "", http.StatusInternalServerError).Wrap(updateErr)
+				}
 			}
 		}
 	} else if hasBotChanged {
@@ -919,6 +948,23 @@ func (a *App) importBot(rctx request.CTX, data *imports.BotImportData, dryRun bo
 
 	if savedBot == nil {
 		savedBot = bot
+	}
+
+	// DisplayName is stored as Users.FirstName, not in the Bots table,
+	// so Bot().Update() alone doesn't persist it. Update the user record
+	// if the DisplayName has diverged.
+	if data.DisplayName != nil && savedBot.UserId != "" {
+		botUser, userErr := a.Srv().Store().User().Get(rctx, savedBot.UserId)
+		if userErr != nil {
+			rctx.Logger().Warn("Failed to fetch bot user for DisplayName update",
+				mlog.String("user_id", savedBot.UserId),
+				mlog.Err(userErr))
+		} else if botUser.FirstName != *data.DisplayName {
+			botUser.FirstName = *data.DisplayName
+			if _, appErr := a.UpdateUser(rctx, botUser, false); appErr != nil {
+				return appErr
+			}
+		}
 	}
 
 	if data.Avatar.ProfileImage != nil {
@@ -1038,7 +1084,7 @@ func (a *App) importUserTeams(rctx request.CTX, user *model.User, data *[]import
 		} else {
 			rawRoles := *tdata.Roles
 			explicitRoles := []string{}
-			for _, role := range strings.Fields(rawRoles) {
+			for role := range strings.FieldsSeq(rawRoles) {
 				if role == model.TeamGuestRoleId {
 					isGuestByTeamID[team.Id] = true
 					isUserByTeamId[team.Id] = false
@@ -1067,7 +1113,7 @@ func (a *App) importUserTeams(rctx request.CTX, user *model.User, data *[]import
 			if appErr != nil {
 				return appErr
 			}
-			member.SchemeAdmin = userShouldBeAdmin
+			member.SchemeAdmin = member.SchemeAdmin || userShouldBeAdmin
 		}
 
 		if tdata.Channels != nil {
@@ -1118,12 +1164,13 @@ func (a *App) importUserTeams(rctx request.CTX, user *model.User, data *[]import
 
 	for _, member := range append(newMembers, oldMembers...) {
 		if member.ExplicitRoles != rolesByTeamID[member.TeamId] {
-			if _, appErr = a.UpdateTeamMemberRoles(rctx, member.TeamId, user.Id, rolesByTeamID[member.TeamId]); appErr != nil {
+			// Bulk import uses internal function to support two-phase role updates.
+			if _, appErr = a.updateTeamMemberRolesInternal(rctx, member.TeamId, user.Id, rolesByTeamID[member.TeamId], true); appErr != nil {
 				return appErr
 			}
 		}
 
-		if _, appErr := a.UpdateTeamMemberSchemeRoles(rctx, member.TeamId, user.Id, isGuestByTeamID[member.TeamId], isUserByTeamId[member.TeamId], isAdminByTeamID[member.TeamId]); appErr != nil {
+		if _, appErr := a.UpdateTeamMemberSchemeRoles(rctx, member.TeamId, user.Id, isGuestByTeamID[member.TeamId], isUserByTeamId[member.TeamId], member.SchemeAdmin || isAdminByTeamID[member.TeamId]); appErr != nil {
 			rctx.Logger().Warn("Error updating team member scheme roles", mlog.String("team_id", member.TeamId), mlog.String("user_id", user.Id), mlog.Err(appErr))
 		}
 	}
@@ -1195,7 +1242,7 @@ func (a *App) importUserChannels(rctx request.CTX, user *model.User, team *model
 		if cdata.Roles != nil {
 			rawRoles := *cdata.Roles
 			explicitRoles := []string{}
-			for _, role := range strings.Fields(rawRoles) {
+			for role := range strings.FieldsSeq(rawRoles) {
 				if role == model.ChannelGuestRoleId {
 					isGuestByChannelId[channel.Id] = true
 					isUserByChannelId[channel.Id] = false
@@ -1310,7 +1357,8 @@ func (a *App) importUserChannels(rctx request.CTX, user *model.User, team *model
 
 	for _, member := range append(newMembers, oldMembers...) {
 		if member.ExplicitRoles != rolesByChannelId[member.ChannelId] {
-			if _, err = a.UpdateChannelMemberRoles(rctx, member.ChannelId, user.Id, rolesByChannelId[member.ChannelId]); err != nil {
+			// Bulk import uses internal function to support two-phase role updates.
+			if _, err = a.updateChannelMemberRolesInternal(rctx, member.ChannelId, user.Id, rolesByChannelId[member.ChannelId], true); err != nil {
 				return err
 			}
 		}
@@ -1366,7 +1414,6 @@ func (a *App) importReplies(rctx request.CTX, data []imports.ReplyImportData, po
 	var err *model.AppError
 	usernames := []string{}
 	for _, replyData := range data {
-		replyData := replyData
 		if err = imports.ValidateReplyImportData(&replyData, post.CreateAt, a.MaxPostSize()); err != nil {
 			return err
 		}
@@ -1395,7 +1442,6 @@ func (a *App) importReplies(rctx request.CTX, data []imports.ReplyImportData, po
 	)
 
 	for _, replyData := range data {
-		replyData := replyData
 		user := users[strings.ToLower(*replyData.User)]
 
 		// Check if this post already exists.
@@ -1988,7 +2034,6 @@ func (a *App) importMultiplePostLines(rctx request.CTX, lines []imports.LineImpo
 	}
 
 	for _, postWithData := range postsWithData {
-		postWithData := postWithData
 		if postWithData.postData.FlaggedBy != nil {
 			var preferences model.Preferences
 
@@ -2012,7 +2057,6 @@ func (a *App) importMultiplePostLines(rctx request.CTX, lines []imports.LineImpo
 
 		if postWithData.postData.Reactions != nil {
 			for _, reaction := range *postWithData.postData.Reactions {
-				reaction := reaction
 				if err := a.importReaction(&reaction, postWithData.post); err != nil {
 					return postWithData.lineNumber, err
 				}
@@ -2037,7 +2081,6 @@ func (a *App) uploadAttachments(rctx request.CTX, attachments *[]imports.Attachm
 	}
 	fileIDs := make(map[string]bool)
 	for _, attachment := range *attachments {
-		attachment := attachment
 		fileInfo, err := a.importAttachment(rctx, &attachment, post, teamID, extractContent)
 		if err != nil {
 			if attachment.Path != nil {
@@ -2063,6 +2106,7 @@ func (a *App) updateFileInfoWithPostId(rctx request.CTX, post *model.Post) {
 		}
 	}
 }
+
 func (a *App) importDirectChannel(rctx request.CTX, data *imports.DirectChannelImportData, dryRun bool) *model.AppError {
 	var err *model.AppError
 	if err = imports.ValidateDirectChannelImportData(data); err != nil {
@@ -2105,7 +2149,7 @@ func (a *App) importDirectChannel(rctx request.CTX, data *imports.DirectChannelI
 		}
 		channel = ch
 	} else {
-		ch, err2 := a.createGroupChannel(rctx, userIDs)
+		ch, err2 := a.createGroupChannel(rctx, userIDs, "")
 		if err2 != nil && err2.Id != store.ChannelExistsError {
 			return model.NewAppError("BulkImport", "app.import.import_direct_channel.create_group_channel.error", nil, "", http.StatusBadRequest).Wrap(err2)
 		}
@@ -2117,7 +2161,7 @@ func (a *App) importDirectChannel(rctx request.CTX, data *imports.DirectChannelI
 		return model.NewAppError("BulkImport", "app.import.import_direct_channel.get_channel_members.error", nil, "", http.StatusBadRequest).Wrap(err)
 	}
 
-	var ems = make([]model.ChannelMember, 0, totalMembers)
+	ems := make([]model.ChannelMember, 0, totalMembers)
 	var page int
 
 	for int64(len(ems)) < totalMembers {
@@ -2136,8 +2180,15 @@ func (a *App) importDirectChannel(rctx request.CTX, data *imports.DirectChannelI
 
 	newChannelMembers := make([]*model.ChannelMember, 0)
 	for _, member := range data.Participants {
+		u := userMap[strings.ToLower(*member.Username)]
+		// Default scheme flags so that imports omitting them still produce a
+		// usable role on the resulting channel member, matching the regular
+		// user-channel import path. Explicit values in the import data still
+		// override these defaults below.
 		m := &model.ChannelMember{
 			NotifyProps: model.GetDefaultChannelNotifyProps(),
+			SchemeGuest: u.IsGuest(),
+			SchemeUser:  !u.IsGuest(),
 		}
 		if member.LastViewedAt != nil {
 			m.LastViewedAt = *member.LastViewedAt
@@ -2205,12 +2256,39 @@ func (a *App) importDirectChannel(rctx request.CTX, data *imports.DirectChannelI
 			}
 		}
 
-		u := userMap[strings.ToLower(*member.Username)]
 		if existing, ok := existingMembers[u.Id]; ok {
 			// Decide which membership is newer. We have LastViewedAt in the import data, which should
 			// give us a good idea of which membership is newer.
 			if existing.LastViewedAt > m.LastViewedAt {
 				continue
+			}
+		} else {
+			// The channel pre-existed (either from a concurrent worker that committed the Channels
+			// row but had not finished its SaveMember loop yet, an earlier import that crashed
+			// mid-loop, or a GM whose membership has since drifted) without this participant.
+			// Insert the ChannelMembers row first so UpdateMultipleMembers below has something
+			// to UPDATE — otherwise it returns ErrNotFound and aborts the import.
+			toInsert := &model.ChannelMember{
+				UserId:      u.Id,
+				ChannelId:   channel.Id,
+				NotifyProps: model.GetDefaultChannelNotifyProps(),
+				SchemeUser:  !u.IsGuest(),
+				SchemeGuest: u.IsGuest(),
+			}
+			if _, nErr := a.Srv().Store().Channel().SaveMember(rctx, toInsert); nErr != nil {
+				var cErr *store.ErrConflict
+				// A concurrent importer may have inserted the row in the meantime — the row
+				// exists, which is all we need before the UPDATE.
+				if !errors.As(nErr, &cErr) {
+					return model.NewAppError("BulkImport", "app.import.import_direct_channel.save_member.error", nil, "", http.StatusInternalServerError).Wrap(nErr)
+				}
+			} else {
+				if histErr := a.Srv().Store().ChannelMemberHistory().LogJoinEvent(u.Id, channel.Id, model.GetMillis()); histErr != nil {
+					rctx.Logger().Warn("Failed to log channel member history join event during import",
+						mlog.String("user_id", u.Id),
+						mlog.String("channel_id", channel.Id),
+						mlog.Err(histErr))
+				}
 			}
 		}
 		m.UserId = u.Id
@@ -2350,7 +2428,7 @@ func (a *App) importMultipleDirectPostLines(rctx request.CTX, lines []imports.Li
 			}
 			channel = ch
 		} else if len(userIDs) > 2 {
-			ch, err = a.createGroupChannel(rctx, userIDs)
+			ch, err = a.createGroupChannel(rctx, userIDs, "")
 			if err != nil && err.Id != store.ChannelExistsError {
 				return line.LineNumber, model.NewAppError("BulkImport", "app.import.import_direct_post.create_group_channel.error", nil, "", http.StatusBadRequest).Wrap(err)
 			}
@@ -2521,7 +2599,6 @@ func (a *App) importMultipleDirectPostLines(rctx request.CTX, lines []imports.Li
 
 		if postWithData.directPostData.Reactions != nil {
 			for _, reaction := range *postWithData.directPostData.Reactions {
-				reaction := reaction
 				if err := a.importReaction(&reaction, postWithData.post); err != nil {
 					return postWithData.lineNumber, err
 				}

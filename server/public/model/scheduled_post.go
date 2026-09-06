@@ -6,11 +6,13 @@ package model
 import (
 	"fmt"
 	"net/http"
+	"time"
 )
 
 const (
 	ScheduledPostErrorUnknownError            = "unknown"
 	ScheduledPostErrorCodeChannelArchived     = "channel_archived"
+	ScheduledPostErrorCodeRestrictedDM        = "restricted_dm"
 	ScheduledPostErrorCodeChannelNotFound     = "channel_not_found"
 	ScheduledPostErrorCodeUserDoesNotExist    = "user_missing"
 	ScheduledPostErrorCodeUserDeleted         = "user_deleted"
@@ -28,10 +30,12 @@ const scheduledPostMaxTimeGap = -5000
 
 type ScheduledPost struct {
 	Draft
-	Id          string `json:"id"`
-	ScheduledAt int64  `json:"scheduled_at"`
-	ProcessedAt int64  `json:"processed_at"`
-	ErrorCode   string `json:"error_code"`
+	Id             string `json:"id"`
+	ScheduledAt    int64  `json:"scheduled_at"`
+	ProcessedAt    int64  `json:"processed_at"`
+	ErrorCode      string `json:"error_code"`
+	RepeatType     string `json:"repeat_type"`
+	RepeatTimezone string `json:"repeat_timezone"`
 }
 
 func (s *ScheduledPost) IsValid(maxMessageSize int) *AppError {
@@ -64,6 +68,31 @@ func (s *ScheduledPost) BaseIsValid() *AppError {
 		return NewAppError("ScheduledPost.IsValid", "model.scheduled_post.is_valid.processed_at.app_error", nil, "id="+s.Id, http.StatusBadRequest)
 	}
 
+	switch s.RepeatType {
+	case ScheduledPostRepeatTypeNone, ScheduledPostRepeatTypeWeekly:
+	default:
+		return NewAppError("ScheduledPost.IsValid", "model.scheduled_post.is_valid.repeat_type.app_error", nil, "id="+s.Id+", repeat_type="+s.RepeatType, http.StatusBadRequest)
+	}
+
+	if s.RepeatType == ScheduledPostRepeatTypeWeekly {
+		// Files are bound to the first post they're attached to, so later occurrences
+		// would silently send without them.
+		if len(s.FileIds) > 0 {
+			return NewAppError("ScheduledPost.IsValid", "model.scheduled_post.is_valid.repeat_files.app_error", nil, "id="+s.Id, http.StatusBadRequest)
+		}
+		if s.RepeatTimezone == "" {
+			return NewAppError("ScheduledPost.IsValid", "model.scheduled_post.is_valid.repeat_timezone.app_error", nil, "id="+s.Id, http.StatusBadRequest)
+		}
+		// "Local" loads successfully but depends on each server's host timezone; a persisted
+		// recurring schedule needs a fixed zone (UTC or an IANA name).
+		if s.RepeatTimezone == "Local" {
+			return NewAppError("ScheduledPost.IsValid", "model.scheduled_post.is_valid.repeat_timezone_invalid.app_error", nil, "id="+s.Id+", repeat_timezone="+s.RepeatTimezone, http.StatusBadRequest)
+		}
+		if _, err := time.LoadLocation(s.RepeatTimezone); err != nil {
+			return NewAppError("ScheduledPost.IsValid", "model.scheduled_post.is_valid.repeat_timezone_invalid.app_error", nil, "id="+s.Id+", repeat_timezone="+s.RepeatTimezone+", "+err.Error(), http.StatusBadRequest)
+		}
+	}
+
 	return nil
 }
 
@@ -83,7 +112,7 @@ func (s *ScheduledPost) PreUpdate() {
 	s.Draft.PreCommit()
 }
 
-// ToPost converts a scheduled post toa  regular, mattermost post object.
+// ToPost converts a scheduled post to a regular, mattermost post object.
 func (s *ScheduledPost) ToPost() (*Post, error) {
 	post := &Post{
 		UserId:    s.UserId,
@@ -92,6 +121,7 @@ func (s *ScheduledPost) ToPost() (*Post, error) {
 		FileIds:   s.FileIds,
 		RootId:    s.RootId,
 		Metadata:  s.Metadata,
+		Type:      s.Type,
 	}
 
 	for key, value := range s.GetProps() {
@@ -119,9 +149,9 @@ func (s *ScheduledPost) ToPost() (*Post, error) {
 		}
 
 		post.Metadata.Priority = &PostPriority{
-			Priority:                NewPointer(priority),
-			RequestedAck:            NewPointer(requestedAck),
-			PersistentNotifications: NewPointer(persistentNotifications),
+			Priority:                new(priority),
+			RequestedAck:            new(requestedAck),
+			PersistentNotifications: new(persistentNotifications),
 		}
 	}
 
@@ -135,15 +165,17 @@ func (s *ScheduledPost) Auditable() map[string]any {
 	}
 
 	return map[string]any{
-		"id":         s.Id,
-		"create_at":  s.CreateAt,
-		"update_at":  s.UpdateAt,
-		"user_id":    s.UserId,
-		"channel_id": s.ChannelId,
-		"root_id":    s.RootId,
-		"props":      s.GetProps(),
-		"file_ids":   s.FileIds,
-		"metadata":   metaData,
+		"id":              s.Id,
+		"create_at":       s.CreateAt,
+		"update_at":       s.UpdateAt,
+		"user_id":         s.UserId,
+		"channel_id":      s.ChannelId,
+		"root_id":         s.RootId,
+		"props":           s.GetProps(),
+		"file_ids":        s.FileIds,
+		"metadata":        metaData,
+		"repeat_type":     s.RepeatType,
+		"repeat_timezone": s.RepeatTimezone,
 	}
 }
 
@@ -153,6 +185,7 @@ func (s *ScheduledPost) RestoreNonUpdatableFields(originalScheduledPost *Schedul
 	s.UserId = originalScheduledPost.UserId
 	s.ChannelId = originalScheduledPost.ChannelId
 	s.RootId = originalScheduledPost.RootId
+	s.Type = originalScheduledPost.Type
 }
 
 func (s *ScheduledPost) SanitizeInput() {

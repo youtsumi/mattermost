@@ -22,7 +22,7 @@ export type Props = {
     handleOpenDirectMessagesModal: () => void;
     unreadFilterEnabled: boolean;
     canCreateCustomGroups: boolean;
-}
+};
 
 const SidebarHeader = (props: Props) => {
     const currentTeam = useSelector(getCurrentTeam);
@@ -32,7 +32,7 @@ const SidebarHeader = (props: Props) => {
     }
 
     return (
-        <header className='sidebarHeaderContainer'>
+        <div className='sidebarHeaderContainer'>
             <SidebarTeamMenu currentTeam={currentTeam}/>
             {(props.canCreateChannel || props.canJoinPublicChannel) && (
                 <SidebarBrowseOrAddChannelMenu
@@ -48,7 +48,7 @@ const SidebarHeader = (props: Props) => {
                     onInvitePeopleClick={props.invitePeopleModal}
                 />
             )}
-        </header>
+        </div>
     );
 };
 

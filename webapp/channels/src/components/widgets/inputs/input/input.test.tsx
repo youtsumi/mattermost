@@ -1,24 +1,11 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import {act, screen} from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import React from 'react';
 
-import {renderWithContext} from 'tests/react_testing_utils';
+import {act, fireEvent, renderWithContext, screen, userEvent} from 'tests/react_testing_utils';
 
 import Input from './input';
-
-// Mock the WithTooltip component to avoid ref issues
-jest.mock('components/with_tooltip', () => ({
-    __esModule: true,
-    default: ({children}: {children: React.ReactNode}) => children,
-}));
-
-// Mock the CloseCircleIcon component to avoid ref issues
-jest.mock('@mattermost/compass-icons/components', () => ({
-    CloseCircleIcon: () => <div data-testid='close-circle-icon'/>,
-}));
 
 describe('components/widgets/inputs/Input', () => {
     test('should match snapshot', () => {
@@ -48,66 +35,136 @@ describe('components/widgets/inputs/Input', () => {
         expect(inputElement).toBeInTheDocument();
 
         // Find the clear button's div container
-        const iconElement = screen.getByTestId('close-circle-icon');
+        const iconElement = document.querySelector('.Input__clear');
         expect(iconElement).toBeInTheDocument();
 
         // Click directly on the icon element
-        await act(async () => {
-            userEvent.click(iconElement);
-        });
+        await userEvent.click(iconElement!);
 
         // Verify onClear was called
         expect(onClear).toHaveBeenCalledTimes(1);
     });
 
-    describe('minLength validation', () => {
-        test('should show error styling when input is empty with minLength set', () => {
-            renderWithContext(
+    describe('handleOnBlur functionality', () => {
+        test('should validate immediately when blur occurs without relatedTarget', async () => {
+            const mockValidate = jest.fn();
+            const mockOnBlur = jest.fn();
+
+            const {container} = renderWithContext(
                 <Input
-                    value={''}
-                    minLength={5}
+                    name='test'
+                    value=''
+                    validate={mockValidate}
+                    onBlur={mockOnBlur}
                 />,
             );
 
-            // Check for the +X indicator
-            const indicator = screen.getByText('+5');
-            expect(indicator).toBeInTheDocument();
+            const input = container.querySelector('input') as HTMLInputElement;
+
+            // Trigger validation on blur - fireEvent used because userEvent doesn't have direct focus/blur methods
+            await act(async () => {
+                fireEvent.focus(input);
+                fireEvent.blur(input);
+            });
+
+            expect(mockValidate).toHaveBeenCalledTimes(1);
+            expect(mockOnBlur).toHaveBeenCalledTimes(1);
+        });
+
+        test('should defer validation when relatedTarget has click method', async () => {
+            const mockValidate = jest.fn();
+
+            const {container} = renderWithContext(
+                <Input
+                    name='test'
+                    value=''
+                    validate={mockValidate}
+                />,
+            );
+
+            const input = container.querySelector('input') as HTMLInputElement;
+
+            // Create button and ensure it has click method
+            const button = document.createElement('button');
+            document.body.appendChild(button);
+
+            await act(async () => {
+                fireEvent.focus(input);
+
+                // Manually trigger the blur with relatedTarget
+                const event = {
+                    target: input,
+                    relatedTarget: button,
+                    preventDefault: jest.fn(),
+                    stopPropagation: jest.fn(),
+                } as any;
+
+                fireEvent.blur(input, event);
+            });
+
+            // Should not validate immediately
+            expect(mockValidate).not.toHaveBeenCalled();
+
+            // Click the button
+            await act(async () => {
+                await userEvent.click(button);
+            });
+
+            // Should validate after click
+            expect(mockValidate).toHaveBeenCalledTimes(1);
+
+            document.body.removeChild(button);
+        });
+    });
+
+    describe('minLength validation', () => {
+        test('should show error styling when input is empty with minLength set', async () => {
+            renderWithContext(
+                <Input
+                    value={''}
+                    minLength={2}
+                />,
+            );
+
+            // Find the input and blur it to trigger validation
+            const inputElement = screen.getByRole('textbox');
+            await act(async () => {
+                inputElement.focus();
+                inputElement.blur();
+            });
 
             // Check for error styling
-            const fieldset = screen.getByRole('group');
+            const fieldset = screen.getByTestId('input-wrapper');
             expect(fieldset).toHaveClass('Input_fieldset___error');
+
+            // Check for error message
+            const errorMessage = screen.getByText(/Must be at least 2 characters/i);
+            expect(errorMessage).toBeInTheDocument();
         });
 
         test('should show error styling and message when input length < minLength', async () => {
             renderWithContext(
                 <Input
-                    value={'abc'}
-                    minLength={5}
+                    value={'a'}
+                    minLength={2}
                 />,
             );
 
             // Find the input
-            const inputElement = screen.getByDisplayValue('abc');
+            const inputElement = screen.getByDisplayValue('a');
 
+            // Clear the input first
             // Simulate change to trigger validation
-            await act(async () => {
-                // Clear the input first
-                userEvent.clear(inputElement);
-
-                // Then type the new value
-                userEvent.type(inputElement, 'abc');
-            });
-
-            // Check for the +X indicator
-            const indicator = screen.getByText('+2');
-            expect(indicator).toBeInTheDocument();
+            await userEvent.clear(inputElement);
+            await userEvent.type(inputElement, 'a');
+            act(() => inputElement.blur());
 
             // Check for error styling
-            const fieldset = screen.getByRole('group');
+            const fieldset = screen.getByTestId('input-wrapper');
             expect(fieldset).toHaveClass('Input_fieldset___error');
 
             // Check for error message
-            const errorMessage = await screen.findByText(/Must be at least 5 characters/i);
+            const errorMessage = await screen.findByText(/Must be at least 2 characters/i);
             expect(errorMessage).toBeInTheDocument();
         });
 
@@ -116,19 +173,19 @@ describe('components/widgets/inputs/Input', () => {
 
             renderWithContext(
                 <Input
-                    value={'abcde'}
-                    minLength={5}
+                    value={'ab'}
+                    minLength={2}
                     onChange={onChange}
                 />,
             );
 
-            // With exactly 5 characters and minLength of 5, there should be no error
+            // With exactly 2 characters and minLength of 2, there should be no error
 
             // Check that the +X indicator is not present
             expect(screen.queryByText(/\+\d+/)).not.toBeInTheDocument();
 
             // Check that error message is not present
-            expect(screen.queryByText(/Must be at least 5 characters/i)).not.toBeInTheDocument();
+            expect(screen.queryByText(/Must be at least 2 characters/i)).not.toBeInTheDocument();
         });
     });
 
@@ -146,14 +203,15 @@ describe('components/widgets/inputs/Input', () => {
                 />,
             );
 
-            // With 6 characters and limit of 5, there should be an error
-
-            // Check for the -X indicator
-            const indicator = screen.getByText('-1');
-            expect(indicator).toBeInTheDocument();
+            // Find the input and blur it to trigger validation
+            const inputElement = screen.getByRole('textbox');
+            await act(async () => {
+                inputElement.focus();
+                inputElement.blur();
+            });
 
             // Check for error styling
-            const fieldset = screen.getByRole('group');
+            const fieldset = screen.getByTestId('input-wrapper');
             expect(fieldset).toHaveClass('Input_fieldset___error');
         });
 
@@ -167,11 +225,6 @@ describe('components/widgets/inputs/Input', () => {
                     onChange={onChange}
                 />,
             );
-
-            // With exactly 5 characters and limit of 5, there should be no error
-
-            // Check that the -X indicator is not present
-            expect(screen.queryByText(/-\d+/)).not.toBeInTheDocument();
 
             // Check that error message is not present
             expect(screen.queryByText(/Must be no more than 5 characters/i)).not.toBeInTheDocument();
@@ -204,7 +257,7 @@ describe('components/widgets/inputs/Input', () => {
             expect(errorMessage).toBeInTheDocument();
 
             // Check for error styling
-            const fieldset = screen.getByRole('group');
+            const fieldset = screen.getByTestId('input-wrapper');
             expect(fieldset).toHaveClass('Input_fieldset___error');
         });
 
@@ -236,7 +289,7 @@ describe('components/widgets/inputs/Input', () => {
                 <Input
                     value={''}
                     required={true}
-                    minLength={5}
+                    minLength={2}
                 />,
             );
 
@@ -254,21 +307,7 @@ describe('components/widgets/inputs/Input', () => {
             expect(errorMessage).toBeInTheDocument();
 
             // Check that minLength error message is not present
-            expect(screen.queryByText(/Must be at least 5 characters/i)).not.toBeInTheDocument();
-        });
-
-        test('should show both minLength indicator and limit indicator when applicable', () => {
-            renderWithContext(
-                <Input
-                    value={'abc'}
-                    minLength={5}
-                    limit={10}
-                />,
-            );
-
-            // Check for the +X indicator for minLength
-            const indicator = screen.getByText('+2');
-            expect(indicator).toBeInTheDocument();
+            expect(screen.queryByText(/Must be at least 2 characters/i)).not.toBeInTheDocument();
         });
     });
 });

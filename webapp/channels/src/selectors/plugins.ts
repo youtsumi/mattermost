@@ -74,6 +74,10 @@ export const getChannelHeaderMenuPluginComponents = createShallowSelector(
     },
 );
 
+export function getChannelSettingsTabs(state: GlobalState) {
+    return state.plugins.channelSettingsTabs || [];
+}
+
 export const getChannelMobileHeaderPluginButtons = createSelector(
     'getChannelMobileHeaderPluginButtons',
     (state: GlobalState) => state.plugins.components.MobileChannelHeaderButton,
@@ -93,6 +97,14 @@ export const getChannelIntroPluginButtons = createSelector(
 export const getAppBarPluginComponents = createSelector(
     'getAppBarPluginComponents',
     (state: GlobalState) => state.plugins.components.AppBar,
+    (components = []) => {
+        return components;
+    },
+);
+
+export const getSidebarBrowseOrAddChannelMenuPluginComponents = createSelector(
+    'getSidebarBrowseOrAddChannelMenuPluginComponents',
+    (state: GlobalState) => state.plugins.components.SidebarBrowseOrAddChannelMenu,
     (components = []) => {
         return components;
     },
@@ -158,3 +170,22 @@ export const getSearchButtons = createSelector(
         return components;
     },
 );
+
+/**
+ * Get a plugin's display name by its ID
+ * Falls back to plugin ID if name is not available, then to 'unknown' if no plugin ID
+ */
+export const getPluginDisplayName = (state: GlobalState, pluginId?: string): string => {
+    if (!pluginId) {
+        return 'unknown';
+    }
+
+    // state.plugins.plugins only holds manifests for plugins that shipped a webapp
+    // bundle and registered themselves in the browser. Server-only plugins never
+    // appear there, so consult the admin plugin statuses (populated by
+    // getPluginStatuses) before falling back to the raw, user-hostile plugin ID.
+    const webappName = state.plugins?.plugins?.[pluginId]?.name;
+    const installedName = state.entities?.admin?.pluginStatuses?.[pluginId]?.name;
+
+    return webappName || installedName || pluginId;
+};

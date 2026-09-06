@@ -1,12 +1,15 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import {Locator, expect, Page} from '@playwright/test';
+import type {Locator, Page} from '@playwright/test';
+import {expect} from '@playwright/test';
 
 import ChannelsHeader from './header';
 import ChannelsPostCreate from './post_create';
 import ChannelsPostEdit from './post_edit';
 import ChannelsPost from './post';
+import ScheduledPostIndicator from './scheduled_post_indicator';
+import FlagPostConfirmationDialog from './flag_post_confirmation_dialog';
 
 import {duration, hexToRgb} from '@/util';
 import {waitUntil} from '@/test_action';
@@ -18,36 +21,35 @@ export default class ChannelsCenterView {
     readonly header;
     readonly postCreate;
     readonly scheduledDraftOptions;
-    readonly postBoxIndicator;
-    readonly scheduledDraftChannelIcon;
-    readonly scheduledDraftChannelInfoMessage;
-    readonly scheduledDraftChannelInfoMessageLocator;
-    readonly scheduledDraftDMChannelLocator;
-    readonly scheduledDraftChannelInfoMessageText;
-    readonly scheduledDraftDMChannelLocatorString;
-    readonly scheduledDraftSeeAllLink;
+    readonly scheduledPostIndicator;
     readonly postEdit;
     readonly editedPostIcon;
     readonly channelBanner;
+    readonly autotranslationBadge;
+    readonly flagPostConfirmationDialog;
+    readonly notificationSeparator;
+    readonly postViews;
+    readonly channelIntro;
 
     constructor(container: Locator, page: Page) {
         this.container = container;
         this.page = page;
 
-        this.scheduledDraftChannelInfoMessageLocator = 'span:has-text("Message scheduled for")';
-        this.scheduledDraftDMChannelLocatorString = 'div.ScheduledPostIndicator span a';
-        this.header = new ChannelsHeader(this.container.locator('.channel-header'));
+        this.header = new ChannelsHeader(this.container.locator('#channel-header'));
         this.postCreate = new ChannelsPostCreate(container.getByTestId('post-create'));
         this.scheduledDraftOptions = new ChannelsPostCreate(container.locator('#dropdown_send_post_options'));
-        this.postEdit = new ChannelsPostEdit(container.locator('.post-edit__container'));
-        this.postBoxIndicator = container.locator('div.postBoxIndicator');
-        this.scheduledDraftChannelIcon = container.locator('#create_post i.icon-draft-indicator');
-        this.scheduledDraftChannelInfoMessage = container.locator('div.ScheduledPostIndicator span');
-        this.scheduledDraftChannelInfoMessageText = container.locator(this.scheduledDraftChannelInfoMessageLocator);
-        this.scheduledDraftDMChannelLocator = container.locator(this.scheduledDraftDMChannelLocatorString);
-        this.scheduledDraftSeeAllLink = container.locator('a:has-text("See all")');
+        this.postEdit = new ChannelsPostEdit(container.getByTestId('post-edit-container'));
+        this.scheduledPostIndicator = new ScheduledPostIndicator(container.getByTestId('scheduledPostIndicator'));
         this.editedPostIcon = (postID: string) => container.locator(`#postEdited_${postID}`);
         this.channelBanner = container.getByTestId('channel_banner_container');
+        this.autotranslationBadge = container.getByTestId('autotranslation-badge');
+        this.flagPostConfirmationDialog = new FlagPostConfirmationDialog(
+            page.getByRole('dialog', {name: 'Quarantine for Review'}),
+            page,
+        );
+        this.notificationSeparator = container.locator('.NotificationSeparator');
+        this.postViews = container.getByTestId('postView');
+        this.channelIntro = container.locator('#channelIntro');
     }
 
     async toBeVisible() {
@@ -57,14 +59,6 @@ export default class ChannelsCenterView {
 
     async postMessage(message: string, files?: string[]) {
         await this.postCreate.postMessage(message, files);
-    }
-
-    /**
-     * Click on "See all scheduled messages"
-     */
-    async clickOnSeeAllscheduledDrafts() {
-        await this.scheduledDraftSeeAllLink.isVisible();
-        await this.scheduledDraftSeeAllLink.click();
     }
 
     /**
@@ -83,6 +77,25 @@ export default class ChannelsCenterView {
         const lastPost = this.container.getByTestId('postView').last();
         await lastPost.waitFor();
         return new ChannelsPost(lastPost);
+    }
+
+    /**
+     * Return the Center post whose body contains the given text.
+     */
+    async getPostByText(text: string) {
+        const post = this.container.getByTestId('postView').filter({hasText: text}).last();
+        await expect(post).toBeVisible();
+        return new ChannelsPost(post);
+    }
+
+    /**
+     * Return the concealed BoR post, pinned by post id so the locator survives reveal.
+     */
+    async getConcealedBorPost() {
+        const placeholder = this.container.getByTestId(/^burn-on-read-concealed-/).last();
+        await expect(placeholder).toBeVisible();
+        const testId = await placeholder.getAttribute('data-testid');
+        return this.getPostById((testId || '').replace('burn-on-read-concealed-', ''));
     }
 
     /**
@@ -110,9 +123,12 @@ export default class ChannelsCenterView {
     /**
      * Returns the Center post by post's id
      * @param postId Just the ID without the prefix
+     * Note: Handles both simple posts (post_id) and combined posts (post_id:timestamp)
      */
     async getPostById(id: string) {
-        const postById = this.container.locator(`[id="post_${id}"]`);
+        // Match either exact ID or ID with timestamp suffix (for combined posts)
+        // Use CSS selector that matches: post_id OR post_id:*
+        const postById = this.container.locator(`[id="post_${id}"], [id^="post_${id}:"]`).first();
         await postById.waitFor();
         return new ChannelsPost(postById);
     }
@@ -140,22 +156,6 @@ export default class ChannelsCenterView {
         );
     }
 
-    async goToScheduledDraftsFromDMChannel() {
-        if (await this.scheduledDraftDMChannelLocator.isVisible()) {
-            await this.scheduledDraftDMChannelLocator.click();
-            return;
-        }
-        await this.scheduledDraftSeeAllLink.isVisible();
-        await this.scheduledDraftSeeAllLink.click();
-    }
-
-    async verifyscheduledDraftChannelInfo() {
-        await this.postBoxIndicator.isVisible();
-        await this.scheduledDraftChannelIcon.isVisible();
-        const messageLocator = this.scheduledDraftChannelInfoMessage.first();
-        await expect(messageLocator).toContainText('Message scheduled for');
-    }
-
     async clickOnLastEditedPost(postID: string | null) {
         if (postID) {
             await this.editedPostIcon(postID).click();
@@ -177,6 +177,12 @@ export default class ChannelsCenterView {
 
     async assertChannelBannerNotVisible() {
         await expect(this.channelBanner).not.toBeVisible();
+    }
+
+    async assertChannelBannerTextNotClipped() {
+        const bannerText = this.channelBanner.getByTestId('channel_banner_text');
+        await expect(bannerText).toBeVisible();
+        await this.assertElementContainedInBanner(bannerText);
     }
 
     async assertChannelBannerHasBoldText(text: string) {
@@ -201,5 +207,87 @@ export default class ChannelsCenterView {
 
         const actualText = await strikethroughText.textContent();
         expect(actualText).toBe(text);
+    }
+
+    async assertChannelBannerHasEmoticon() {
+        const emoji = this.channelBanner.getByTestId(/^postEmoji\./).first();
+        await expect(emoji).toBeVisible();
+
+        const backgroundImage = await emoji.evaluate((el) => {
+            return window.getComputedStyle(el).getPropertyValue('background-image');
+        });
+
+        expect(backgroundImage).not.toBe('none');
+    }
+
+    async assertChannelBannerImageEmojiSize(expectedSizePx: number) {
+        const emoji = this.channelBanner.getByTestId(/^postEmoji\./).first();
+        await expect(emoji).toBeVisible();
+
+        const {width, height} = await emoji.evaluate((el) => {
+            const styles = window.getComputedStyle(el);
+            return {
+                width: styles.getPropertyValue('width'),
+                height: styles.getPropertyValue('height'),
+            };
+        });
+
+        expect(width).toBe(`${expectedSizePx}px`);
+        expect(height).toBe(`${expectedSizePx}px`);
+
+        await this.assertElementContainedInBanner(emoji);
+    }
+
+    async assertChannelBannerUnicodeEmojiSize(expectedSizePx: number) {
+        const emoji = this.channelBanner.getByTestId('channel-banner-unicode-emoji').first();
+        await expect(emoji).toBeVisible();
+
+        const fontSize = await emoji.evaluate((el) => {
+            return window.getComputedStyle(el).getPropertyValue('font-size');
+        });
+
+        expect(fontSize).toBe(`${expectedSizePx}px`);
+
+        await this.assertElementContainedInBanner(emoji);
+    }
+
+    /**
+     * Asserts that the given element's bounding box lies fully within the channel
+     * banner's content area (banner bounds minus computed padding).
+     *
+     * Uses getBoundingClientRect() coordinates, which are NOT clipped by parent
+     * overflow — so if an element protrudes into or beyond the padding zone it will
+     * be visually clipped by `overflow: hidden` on the text container, and this
+     * assertion will catch that.
+     *
+     * A small epsilon is applied to each boundary to avoid flaky failures caused
+     * by sub-pixel rounding differences in layout engines.
+     */
+    private async assertElementContainedInBanner(element: Locator) {
+        const EPSILON = 0.5;
+
+        const bannerBox = await this.channelBanner.boundingBox();
+        const elementBox = await element.boundingBox();
+
+        expect(bannerBox).not.toBeNull();
+        expect(elementBox).not.toBeNull();
+
+        const banner = bannerBox!;
+        const el = elementBox!;
+
+        const {paddingTop, paddingBottom, paddingLeft, paddingRight} = await this.channelBanner.evaluate((node) => {
+            const styles = window.getComputedStyle(node);
+            return {
+                paddingTop: parseFloat(styles.paddingTop),
+                paddingBottom: parseFloat(styles.paddingBottom),
+                paddingLeft: parseFloat(styles.paddingLeft),
+                paddingRight: parseFloat(styles.paddingRight),
+            };
+        });
+
+        expect(el.y).toBeGreaterThanOrEqual(banner.y + paddingTop - EPSILON);
+        expect(el.y + el.height).toBeLessThanOrEqual(banner.y + banner.height - paddingBottom + EPSILON);
+        expect(el.x).toBeGreaterThanOrEqual(banner.x + paddingLeft - EPSILON);
+        expect(el.x + el.width).toBeLessThanOrEqual(banner.x + banner.width - paddingRight + EPSILON);
     }
 }

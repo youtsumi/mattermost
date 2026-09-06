@@ -2,6 +2,7 @@
 // See LICENSE.txt for license information.
 
 import React, {useCallback} from 'react';
+import {useIntl} from 'react-intl';
 import {useSelector} from 'react-redux';
 
 import type {Group} from '@mattermost/types/groups';
@@ -28,9 +29,10 @@ export type Props = {
     actions: {
         removeUsersFromGroup: (groupId: string, userIds: string[]) => Promise<ActionResult>;
     };
-}
+};
 
 const ViewUserGroupListItem = (props: Props) => {
+    const {formatMessage} = useIntl();
     const {
         user,
         group,
@@ -76,10 +78,14 @@ const ViewUserGroupListItem = (props: Props) => {
                 <button
                     type='button'
                     className='remove-group-member btn btn-icon btn-xs'
-                    aria-label='Close'
+                    aria-label={formatMessage({
+                        id: 'view_user_group_list_item.removeUserFromGroup',
+                        defaultMessage: 'Remove {user} from group',
+                    }, {user: Utils.getFullName(user)})}
                     onClick={removeUserFromGroup}
                 >
                     <i
+                        aria-hidden='true'
                         className='icon icon-trash-can-outline'
                     />
                 </button>

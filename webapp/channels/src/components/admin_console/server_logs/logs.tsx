@@ -5,6 +5,7 @@ import debounce from 'lodash/debounce';
 import React from 'react';
 import {FormattedMessage, defineMessages} from 'react-intl';
 
+import {Button, buttonClassNames} from '@mattermost/shared/components/button';
 import type {
     LogFilter,
     LogLevels,
@@ -20,15 +21,19 @@ import AdminHeader from 'components/widgets/admin_console/admin_header';
 import LogList from './log_list';
 import PlainLogList from './plain_log_list';
 
+type LogObjectWithAdditionalInfo = LogObject & {
+    [key: string]: string;
+};
+
 type Props = {
-    logs: LogObject[];
+    logs: LogObjectWithAdditionalInfo[];
     plainLogs: string[];
     isPlainLogs: boolean;
     actions: {
         getLogs: (logFilter: LogFilter) => Promise<unknown>;
         getPlainLogs: (
             page?: number | undefined,
-            perPage?: number | undefined
+            perPage?: number | undefined,
         ) => Promise<unknown>;
     };
 };
@@ -121,12 +126,24 @@ export default class Logs extends React.PureComponent<Props, State> {
 
     performSearch = debounce(() => {
         const {search} = this.state;
-        const filteredLogs = this.props.logs.filter((log) => {
-            // to be improved
-            return `${log.caller}${log.msg}${log.worker}${log.worker}`.toLowerCase().includes(search.toLowerCase());
-        });
+
+        // Excluding level and timestamp from search
+        const excludedKeys = new Set(['level', 'timestamp']);
+
+        const filteredLogs = this.props.logs.filter((log) =>
+            Object.entries(log).some(([key, value]) => {
+                if (excludedKeys.has(key)) {
+                    return false;
+                }
+                return String(value).toLowerCase().includes(search.toLowerCase());
+            }),
+        );
         this.setState({filteredLogs});
     }, 200);
+
+    componentWillUnmount(): void {
+        this.performSearch.cancel();
+    }
 
     onFiltersChange = ({
         dateFrom,
@@ -156,12 +173,6 @@ export default class Logs extends React.PureComponent<Props, State> {
                 onSearchChange={this.onSearchChange}
                 search={this.state.search}
                 onFiltersChange={this.onFiltersChange}
-                filters={{
-                    dateFrom: this.state.dateFrom,
-                    dateTo: this.state.dateTo,
-                    logLevels: this.state.logLevels,
-                    serverNames: this.state.serverNames,
-                }}
             />
         );
 
@@ -207,7 +218,7 @@ export default class Logs extends React.PureComponent<Props, State> {
         }
 
         return (
-            <div className='wrapper--admin'>
+            <div className='wrapper--fixed'>
                 <AdminHeader>
                     <FormattedMessage {...messages.title}/>
                 </AdminHeader>
@@ -221,19 +232,19 @@ export default class Logs extends React.PureComponent<Props, State> {
                             </div>
                             <div className='banner-buttons'>
                                 {toggleLogFormat}
-                                <button
+                                <Button
                                     type='submit'
-                                    className='btn btn-primary'
+                                    emphasis='primary'
                                     onClick={this.reload}
                                 >
                                     <FormattedMessage
                                         id='admin.logs.ReloadLogs'
                                         defaultMessage='Reload Logs'
                                     />
-                                </button>
+                                </Button>
                                 <ExternalLink
                                     location='download_logs'
-                                    className='btn btn-primary'
+                                    className={buttonClassNames({emphasis: 'primary'})}
                                     href={Client4.getUrl() + '/api/v4/logs/download'}
                                 >
                                     <FormattedMessage

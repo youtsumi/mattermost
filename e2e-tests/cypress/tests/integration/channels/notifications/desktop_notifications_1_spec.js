@@ -10,14 +10,14 @@
 // Stage: @prod
 // Group: @channels @notifications
 
-import * as MESSAGES from '../../../fixtures/messages';
-import * as TIMEOUTS from '../../../fixtures/timeouts';
-import {spyNotificationAs} from '../../../support/notification';
-
 import {
     changeDesktopNotificationAs,
     changeTeammateNameDisplayAs,
 } from './helper';
+
+import * as MESSAGES from '@/fixtures/messages';
+import * as TIMEOUTS from '@/fixtures/timeouts';
+import {spyNotificationAs} from '@/support/notification';
 
 describe('Desktop notifications', () => {
     let testTeam;
@@ -144,7 +144,7 @@ describe('Desktop notifications', () => {
         spyNotificationAs('withNotification', 'granted');
 
         const actualMsg = '---';
-        const expected = '@' + otherUser.username + ' did something new';
+        const expected = '@' + otherUser.username + ' posted a message';
 
         // # Ensure notifications are set up to fire a desktop notification for all activity.
         changeDesktopNotificationAs('all');

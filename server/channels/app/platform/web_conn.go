@@ -62,17 +62,18 @@ type pluginWSPostedHook struct {
 }
 
 type WebConnConfig struct {
-	WebSocket     *websocket.Conn
-	Session       model.Session
-	TFunc         i18n.TranslateFunc
-	Locale        string
-	ConnectionID  string
-	Active        bool
-	ReuseCount    int
-	OriginClient  string
-	PostedAck     bool
-	RemoteAddress string
-	XForwardedFor string
+	WebSocket         *websocket.Conn
+	Session           model.Session
+	TFunc             i18n.TranslateFunc
+	Locale            string
+	ConnectionID      string
+	Active            bool
+	ReuseCount        int
+	OriginClient      string
+	PostedAck         bool
+	RemoteAddress     string
+	XForwardedFor     string
+	DisconnectErrCode string
 
 	// These aren't necessary to be exported to api layer.
 	sequence         int64
@@ -85,16 +86,17 @@ type WebConnConfig struct {
 // It contains all the necessary state to manage sending/receiving data to/from
 // a websocket.
 type WebConn struct {
-	sessionExpiresAt int64 // This should stay at the top for 64-bit alignment of 64-bit words accessed atomically
-	Platform         *PlatformService
-	Suite            SuiteIFace
-	HookRunner       HookRunner
-	WebSocket        *websocket.Conn
-	T                i18n.TranslateFunc
-	Locale           string
-	Sequence         int64
-	UserId           string
-	PostedAck        bool
+	sessionExpiresAt  int64 // This should stay at the top for 64-bit alignment of 64-bit words accessed atomically
+	Platform          *PlatformService
+	Suite             SuiteIFace
+	HookRunner        HookRunner
+	WebSocket         *websocket.Conn
+	T                 i18n.TranslateFunc
+	Locale            string
+	Sequence          int64
+	UserId            string
+	PostedAck         bool
+	DisconnectErrCode string
 
 	allChannelMembers         map[string]string
 	lastAllChannelMembersTime int64
@@ -246,6 +248,7 @@ func (ps *PlatformService) NewWebConn(cfg *WebConnConfig, suite SuiteIFace, runn
 		T:                  cfg.TFunc,
 		Locale:             cfg.Locale,
 		PostedAck:          cfg.PostedAck,
+		DisconnectErrCode:  cfg.DisconnectErrCode,
 		reuseCount:         cfg.ReuseCount,
 		endWritePump:       make(chan struct{}),
 		pumpFinished:       make(chan struct{}),
@@ -404,11 +407,9 @@ func (wc *WebConn) SetSession(v *model.Session) {
 // is ready to send/receive messages.
 func (wc *WebConn) Pump() {
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		wc.writePump()
-	}()
+	})
 
 	wg.Add(1)
 	go wc.pluginPostedConsumer(&wg)
@@ -450,7 +451,7 @@ func (wc *WebConn) readPump() {
 		if err := wc.WebSocket.SetReadDeadline(time.Now().Add(pongWaitTime)); err != nil {
 			return err
 		}
-		if wc.IsAuthenticated() {
+		if wc.IsBasicAuthenticated() {
 			userID := wc.UserId
 			wc.Platform.Go(func() {
 				wc.Platform.SetStatusAwayIfNeeded(userID, false)
@@ -463,6 +464,12 @@ func (wc *WebConn) readPump() {
 		msgType, rd, err := wc.WebSocket.NextReader()
 		if err != nil {
 			wc.logSocketErr("websocket.NextReader", err)
+			return
+		}
+
+		// Reject binary frames from unauthenticated connections. See MM-68222.
+		if msgType != websocket.TextMessage && !wc.IsAuthenticated() {
+			wc.logSocketErr("websocket.UnauthBinary", errors.New("binary frames require authentication"))
 			return
 		}
 
@@ -523,7 +530,7 @@ func (wc *WebConn) writePump() {
 				return
 			}
 			if m := wc.Platform.metricsIFace; m != nil {
-				m.IncrementWebsocketReconnectEvent(reconnectFound)
+				m.IncrementWebsocketReconnectEventWithDisconnectErrCode(reconnectFound, wc.DisconnectErrCode)
 			}
 		} else if wc.hasMsgLoss() {
 			// If the seq number is not in dead queue, but it was supposed to be,
@@ -541,11 +548,11 @@ func (wc *WebConn) writePump() {
 				return
 			}
 			if m := wc.Platform.metricsIFace; m != nil {
-				m.IncrementWebsocketReconnectEvent(reconnectNotFound)
+				m.IncrementWebsocketReconnectEventWithDisconnectErrCode(reconnectNotFound, wc.DisconnectErrCode)
 			}
 		} else {
 			if m := wc.Platform.metricsIFace; m != nil {
-				m.IncrementWebsocketReconnectEvent(reconnectLossless)
+				m.IncrementWebsocketReconnectEventWithDisconnectErrCode(reconnectLossless, wc.DisconnectErrCode)
 			}
 		}
 	}
@@ -566,6 +573,10 @@ func (wc *WebConn) writePump() {
 			}
 
 			evt, evtOk := msg.(*model.WebSocketEvent)
+
+			if evtOk && evt.IsRejected() {
+				continue
+			}
 
 			buf.Reset()
 			var err error
@@ -699,7 +710,7 @@ func _hasMsgLoss(deadQueue []*model.WebSocketEvent, deadQueuePtr int, seq int64)
 func _isInDeadQueue(deadQueue []*model.WebSocketEvent, seq int64) (bool, int) {
 	// Can be optimized to traverse backwards from deadQueuePointer
 	// Hopefully, traversing 128 elements is not too much overhead.
-	for i := 0; i < deadQueueSize; i++ {
+	for i := range deadQueueSize {
 		elem := deadQueue[i]
 		if elem == nil {
 			return false, 0
@@ -713,7 +724,7 @@ func _isInDeadQueue(deadQueue []*model.WebSocketEvent, seq int64) (bool, int) {
 }
 
 func (wc *WebConn) clearDeadQueue() {
-	for i := 0; i < deadQueueSize; i++ {
+	for i := range deadQueueSize {
 		if wc.deadQueue[i] == nil {
 			break
 		}
@@ -767,8 +778,8 @@ func (wc *WebConn) InvalidateCache() {
 	wc.SetSessionExpiresAt(0)
 }
 
-// IsAuthenticated returns whether the given WebConn is authenticated or not.
-func (wc *WebConn) IsAuthenticated() bool {
+// IsBasicAuthenticated returns whether the given WebConn has a valid session.
+func (wc *WebConn) IsBasicAuthenticated() bool {
 	// Check the expiry to see if we need to check for a new session
 	if wc.GetSessionExpiresAt() < model.GetMillis() {
 		if wc.GetSessionToken() == "" {
@@ -794,6 +805,25 @@ func (wc *WebConn) IsAuthenticated() bool {
 	}
 
 	return true
+}
+
+// IsMFAAuthenticated returns whether the user has completed MFA when required.
+func (wc *WebConn) IsMFAAuthenticated() bool {
+	session := wc.GetSession()
+	c := request.EmptyContext(wc.Platform.logger).WithSession(session)
+
+	// Check if MFA is required and user has NOT completed MFA
+	// WebSocket connections are established via an HTTP GET upgrade request.
+	if appErr := wc.Suite.MFARequired(c, http.MethodGet); appErr != nil {
+		return false
+	}
+
+	return true
+}
+
+// IsAuthenticated returns whether the given WebConn is fully authenticated (session + MFA).
+func (wc *WebConn) IsAuthenticated() bool {
+	return wc.IsBasicAuthenticated() && wc.IsMFAAuthenticated()
 }
 
 func (wc *WebConn) createHelloMessage() *model.WebSocketEvent {
@@ -853,7 +883,7 @@ func (wc *WebConn) ShouldSendEventToGuest(msg *model.WebSocketEvent) bool {
 
 // ShouldSendEvent returns whether the message should be sent or not.
 func (wc *WebConn) ShouldSendEvent(msg *model.WebSocketEvent) bool {
-	// IMPORTANT: Do not send event if WebConn does not have a session
+	// IMPORTANT: Do not send event if WebConn does not have a session and completed MFA
 	if !wc.IsAuthenticated() {
 		return false
 	}
@@ -890,21 +920,39 @@ func (wc *WebConn) ShouldSendEvent(msg *model.WebSocketEvent) bool {
 	// If the event contains sanitized data, only send to users that don't have permission to
 	// see sensitive data. Prevents admin clients from receiving events with bad data
 	var hasReadPrivateDataPermission *bool
-	if msg.GetBroadcast().ContainsSanitizedData {
-		hasReadPrivateDataPermission = model.NewPointer(wc.Suite.RolesGrantPermission(wc.GetSession().GetUserRoles(), model.PermissionManageSystem.Id))
+	sessionRoles := wc.GetSession().GetUserRoles()
+	sessionHasPermission := func(permissionId string) bool {
+		if permissionId == model.PermissionManageSystem.Id {
+			// Cache the manage_system lookup because multiple broadcast filters can require it.
+			if hasReadPrivateDataPermission == nil {
+				hasPermission := wc.Suite.RolesGrantPermission(sessionRoles, model.PermissionManageSystem.Id)
+				hasReadPrivateDataPermission = &hasPermission
+			}
+			return *hasReadPrivateDataPermission
+		}
 
-		if *hasReadPrivateDataPermission {
+		return wc.Suite.RolesGrantPermission(sessionRoles, permissionId)
+	}
+
+	if msg.GetBroadcast().ContainsSanitizedData {
+		if sessionHasPermission(model.PermissionManageSystem.Id) {
 			return false
 		}
 	}
 
-	// If the event contains sensitive data, only send to users with permission to see it
-	if msg.GetBroadcast().ContainsSensitiveData {
-		if hasReadPrivateDataPermission == nil {
-			hasReadPrivateDataPermission = model.NewPointer(wc.Suite.RolesGrantPermission(wc.GetSession().GetUserRoles(), model.PermissionManageSystem.Id))
+	// If the event contains sensitive data, only send to users with permission to see it.
+	// RequiredPermissions, when set, takes precedence over this fallback: it is the more
+	// specific check, and ContainsSensitiveData is only kept alongside it so that nodes
+	// running a version that predates RequiredPermissions still fail closed (sysadmin-only)
+	// instead of broadcasting the event unfiltered during a mixed-version cluster rollout.
+	if msg.GetBroadcast().ContainsSensitiveData && len(msg.GetBroadcast().RequiredPermissions) == 0 {
+		if !sessionHasPermission(model.PermissionManageSystem.Id) {
+			return false
 		}
+	}
 
-		if !*hasReadPrivateDataPermission {
+	for _, permissionId := range msg.GetBroadcast().RequiredPermissions {
+		if !sessionHasPermission(permissionId) {
 			return false
 		}
 	}
@@ -934,12 +982,11 @@ func (wc *WebConn) ShouldSendEvent(msg *model.WebSocketEvent) bool {
 	if chID := msg.GetBroadcast().ChannelId; chID != "" {
 		// For typing/reaction_added/reaction_removed events, we don't send them to users
 		// who don't have that channel or thread opened.
-		if wc.Platform.Config().FeatureFlags.WebSocketEventScope &&
-			slices.Contains([]model.WebsocketEventType{
-				model.WebsocketEventTyping,
-				model.WebsocketEventReactionAdded,
-				model.WebsocketEventReactionRemoved,
-			}, msg.EventType()) && wc.notInChannel(chID) && wc.notInThread(chID) {
+		if slices.Contains([]model.WebsocketEventType{
+			model.WebsocketEventTyping,
+			model.WebsocketEventReactionAdded,
+			model.WebsocketEventReactionRemoved,
+		}, msg.EventType()) && wc.notInChannel(chID) && wc.notInThread(chID) {
 			return false
 		}
 

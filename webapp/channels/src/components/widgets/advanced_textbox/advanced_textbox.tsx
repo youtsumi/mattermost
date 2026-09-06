@@ -27,7 +27,7 @@ type AdvancedTextboxProps = {
     descriptionMessage?: JSX.Element | string;
     hasError?: boolean;
     errorMessage?: string | JSX.Element;
-    onValidate?: (value: string) => { isValid: boolean; errorMessage?: string };
+    onValidate?: (value: string) => {isValid: boolean; errorMessage?: string};
     showCharacterCount?: boolean;
     readOnly?: boolean;
     name?: string; // Added name prop for floating label
@@ -136,6 +136,7 @@ const AdvancedTextbox = ({
                     hasError={hasError}
                     onFocus={handleFocus}
                     onBlur={handleBlur}
+                    disabled={readOnly}
                 />
             </div>
             {!readOnly && value.trim().length > 0 && (
@@ -150,7 +151,7 @@ const AdvancedTextbox = ({
                 {internalError && (
                     <div className='AdvancedTextbox__error-message'>
                         <i className='icon icon-alert-circle-outline'/>
-                        <span>{internalError}</span>
+                        <span data-testid='advanced-textbox-error-text'>{internalError}</span>
                     </div>
                 )}
 

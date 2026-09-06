@@ -4,10 +4,12 @@
 package config
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/mattermost/mattermost/server/public/model"
+	"github.com/mattermost/mattermost/server/v8/fips"
 )
 
 // GenerateClientConfig renders the given configuration for a client.
@@ -20,9 +22,10 @@ func GenerateClientConfig(c *model.Config, telemetryID string, license *model.Li
 	props["RestrictDirectMessage"] = *c.TeamSettings.RestrictDirectMessage
 	props["TeammateNameDisplay"] = *c.TeamSettings.TeammateNameDisplay
 	props["LockTeammateNameDisplay"] = strconv.FormatBool(*c.TeamSettings.LockTeammateNameDisplay)
+	props["LockProfileFieldsForEmailUsers"] = model.TeamSettingsLockProfileFieldsNone
 	props["ExperimentalPrimaryTeam"] = *c.TeamSettings.ExperimentalPrimaryTeam
-	props["ExperimentalViewArchivedChannels"] = strconv.FormatBool(*c.TeamSettings.ExperimentalViewArchivedChannels)
 	props["EnableJoinLeaveMessageByDefault"] = strconv.FormatBool(*c.TeamSettings.EnableJoinLeaveMessageByDefault)
+	props["EnableChannelCategorySorting"] = strconv.FormatBool(*c.TeamSettings.EnableChannelCategorySorting)
 
 	props["EnableBotAccountCreation"] = strconv.FormatBool(*c.ServiceSettings.EnableBotAccountCreation)
 	props["EnableDesktopLandingPage"] = strconv.FormatBool(*c.ServiceSettings.EnableDesktopLandingPage)
@@ -35,6 +38,7 @@ func GenerateClientConfig(c *model.Config, telemetryID string, license *model.Li
 	props["EnablePostUsernameOverride"] = strconv.FormatBool(*c.ServiceSettings.EnablePostUsernameOverride)
 	props["EnablePostIconOverride"] = strconv.FormatBool(*c.ServiceSettings.EnablePostIconOverride)
 	props["EnableUserAccessTokens"] = strconv.FormatBool(*c.ServiceSettings.EnableUserAccessTokens)
+	props["MaximumPersonalAccessTokenLifetimeDays"] = strconv.Itoa(*c.ServiceSettings.MaximumPersonalAccessTokenLifetimeDays)
 	props["EnableLinkPreviews"] = strconv.FormatBool(*c.ServiceSettings.EnableLinkPreviews)
 	props["EnablePermalinkPreviews"] = strconv.FormatBool(*c.ServiceSettings.EnablePermalinkPreviews)
 	props["EnableTesting"] = strconv.FormatBool(*c.ServiceSettings.EnableTesting)
@@ -52,6 +56,7 @@ func GenerateClientConfig(c *model.Config, telemetryID string, license *model.Li
 	props["EnableInlineLatex"] = strconv.FormatBool(*c.ServiceSettings.EnableInlineLatex)
 	props["ExtendSessionLengthWithActivity"] = strconv.FormatBool(*c.ServiceSettings.ExtendSessionLengthWithActivity)
 	props["ManagedResourcePaths"] = *c.ServiceSettings.ManagedResourcePaths
+	props["DeleteAccountLink"] = *c.ServiceSettings.DeleteAccountLink
 
 	// This setting is only temporary, so keep using the old setting name for the mobile and web apps
 	props["ExperimentalEnablePostMetadata"] = "true"
@@ -70,12 +75,12 @@ func GenerateClientConfig(c *model.Config, telemetryID string, license *model.Li
 
 	props["ShowEmailAddress"] = strconv.FormatBool(*c.PrivacySettings.ShowEmailAddress)
 	props["ShowFullName"] = strconv.FormatBool(*c.PrivacySettings.ShowFullName)
+	props["UseAnonymousURLs"] = strconv.FormatBool(*c.PrivacySettings.UseAnonymousURLs)
 
 	props["EnableFileAttachments"] = strconv.FormatBool(*c.FileSettings.EnableFileAttachments)
 	props["EnablePublicLink"] = strconv.FormatBool(*c.FileSettings.EnablePublicLink)
 
 	props["AvailableLocales"] = *c.LocalizationSettings.AvailableLocales
-	props["EnableExperimentalLocales"] = strconv.FormatBool(*c.LocalizationSettings.EnableExperimentalLocales)
 
 	props["SQLDriverName"] = *c.SqlSettings.DriverName
 
@@ -100,7 +105,6 @@ func GenerateClientConfig(c *model.Config, telemetryID string, license *model.Li
 	props["DisableRefetchingOnBrowserFocus"] = strconv.FormatBool(*c.ExperimentalSettings.DisableRefetchingOnBrowserFocus)
 	props["DisableWakeUpReconnectHandler"] = strconv.FormatBool(*c.ExperimentalSettings.DisableWakeUpReconnectHandler)
 	props["UsersStatusAndProfileFetchingPollIntervalMilliseconds"] = strconv.FormatInt(*c.ExperimentalSettings.UsersStatusAndProfileFetchingPollIntervalMilliseconds, 10)
-
 	// Here we set the new option, but we also send the old FeatureFlag property for backwards compatibility on mobile < 2.27
 	props["EnableCrossTeamSearch"] = strconv.FormatBool(*c.ServiceSettings.EnableCrossTeamSearch)
 	props["FeatureFlagExperimentalCrossTeamSearch"] = strconv.FormatBool(*c.ServiceSettings.EnableCrossTeamSearch)
@@ -147,10 +151,19 @@ func GenerateClientConfig(c *model.Config, telemetryID string, license *model.Li
 	props["PersistentNotificationMaxCount"] = strconv.FormatInt(int64(*c.ServiceSettings.PersistentNotificationMaxCount), 10)
 	props["PersistentNotificationIntervalMinutes"] = strconv.FormatInt(int64(*c.ServiceSettings.PersistentNotificationIntervalMinutes), 10)
 	props["PersistentNotificationMaxRecipients"] = strconv.FormatInt(int64(*c.ServiceSettings.PersistentNotificationMaxRecipients), 10)
+	props["EnableBurnOnRead"] = strconv.FormatBool(*c.ServiceSettings.EnableBurnOnRead)
+	props["BurnOnReadDurationSeconds"] = strconv.Itoa(*c.ServiceSettings.BurnOnReadDurationSeconds)
+	props["BurnOnReadMaximumTimeToLiveSeconds"] = strconv.Itoa(*c.ServiceSettings.BurnOnReadMaximumTimeToLiveSeconds)
 	props["AllowSyncedDrafts"] = strconv.FormatBool(*c.ServiceSettings.AllowSyncedDrafts)
 	props["DelayChannelAutocomplete"] = strconv.FormatBool(*c.ExperimentalSettings.DelayChannelAutocomplete)
 	props["YoutubeReferrerPolicy"] = strconv.FormatBool(*c.ExperimentalSettings.YoutubeReferrerPolicy)
 	props["UniqueEmojiReactionLimitPerPost"] = strconv.FormatInt(int64(*c.ServiceSettings.UniqueEmojiReactionLimitPerPost), 10)
+
+	props["EnableAttributeBasedAccessControl"] = strconv.FormatBool(*c.AccessControlSettings.EnableAttributeBasedAccessControl)
+	props["EnableUserManagedAttributes"] = strconv.FormatBool(*c.AccessControlSettings.EnableUserManagedAttributes)
+	props["EnableAccessControlAuditLogging"] = strconv.FormatBool(*c.AccessControlSettings.EnableAccessControlAuditLogging)
+	props["AuditLoggingActive"] = strconv.FormatBool(IsAuditLoggingActive(c.ExperimentalAuditSettings, license != nil && license.Features != nil && *license.Features.AdvancedLogging))
+	props["EnableChannelPolicyIndicators"] = strconv.FormatBool(*c.AccessControlSettings.EnableChannelPolicyIndicators)
 
 	props["WranglerPermittedWranglerRoles"] = strings.Join(c.WranglerSettings.PermittedWranglerRoles, ",")
 	props["WranglerAllowedEmailDomain"] = strings.Join(c.WranglerSettings.AllowedEmailDomain, ",")
@@ -184,11 +197,6 @@ func GenerateClientConfig(c *model.Config, telemetryID string, license *model.Li
 			props["SamlPositionAttributeSet"] = strconv.FormatBool(*c.SamlSettings.PositionAttribute != "")
 		}
 
-		if *license.Features.FutureFeatures {
-			props["ExperimentalClientSideCertEnable"] = strconv.FormatBool(*c.ExperimentalSettings.ClientSideCertEnable)
-			props["ExperimentalClientSideCertCheck"] = *c.ExperimentalSettings.ClientSideCertCheck
-		}
-
 		if *license.Features.Cluster {
 			props["EnableCluster"] = strconv.FormatBool(*c.ClusterSettings.Enable)
 		}
@@ -196,7 +204,7 @@ func GenerateClientConfig(c *model.Config, telemetryID string, license *model.Li
 		if *license.Features.Cluster {
 			props["EnableMetrics"] = strconv.FormatBool(*c.MetricsSettings.Enable)
 			props["EnableClientMetrics"] = strconv.FormatBool(*c.MetricsSettings.Enable && *c.MetricsSettings.EnableClientMetrics)
-			props["EnableNotificationMetrics"] = strconv.FormatBool(c.FeatureFlags.NotificationMonitoring && *c.MetricsSettings.EnableNotificationMetrics)
+			props["EnableNotificationMetrics"] = strconv.FormatBool(*c.MetricsSettings.EnableNotificationMetrics)
 		}
 
 		if *license.Features.Announcement {
@@ -223,7 +231,7 @@ func GenerateClientConfig(c *model.Config, telemetryID string, license *model.Li
 
 		if license.HasSharedChannels() {
 			props["ExperimentalSharedChannels"] = strconv.FormatBool(*c.ConnectedWorkspacesSettings.EnableSharedChannels)
-			props["ExperimentalRemoteClusterService"] = strconv.FormatBool(c.FeatureFlags.EnableRemoteClusterService && *c.ConnectedWorkspacesSettings.EnableRemoteClusterService)
+			props["ExperimentalRemoteClusterService"] = strconv.FormatBool(*c.ConnectedWorkspacesSettings.EnableRemoteClusterService)
 		}
 
 		if model.MinimumProfessionalLicense(license) {
@@ -232,10 +240,40 @@ func GenerateClientConfig(c *model.Config, telemetryID string, license *model.Li
 			props["ScheduledPosts"] = strconv.FormatBool(*c.ServiceSettings.ScheduledPosts)
 		}
 
-		if license.SkuShortName == model.LicenseShortSkuEnterprise {
+		if model.MinimumEnterpriseLicense(license) {
 			props["MobileEnableBiometrics"] = strconv.FormatBool(*c.NativeAppSettings.MobileEnableBiometrics)
 			props["MobilePreventScreenCapture"] = strconv.FormatBool(*c.NativeAppSettings.MobilePreventScreenCapture)
 			props["MobileJailbreakProtection"] = strconv.FormatBool(*c.NativeAppSettings.MobileJailbreakProtection)
+			props["ExperimentalEnableWatermark"] = strconv.FormatBool(*c.ExperimentalSettings.EnableWatermark)
+			props["LockProfileFieldsForEmailUsers"] = *c.TeamSettings.LockProfileFieldsForEmailUsers
+		}
+
+		if model.MinimumEnterpriseAdvancedLicense(license) {
+			props["MobileEnableSecureFilePreview"] = strconv.FormatBool(*c.NativeAppSettings.MobileEnableSecureFilePreview)
+			props["MobileAllowPdfLinkNavigation"] = strconv.FormatBool(*c.NativeAppSettings.MobileAllowPdfLinkNavigation)
+
+			props["ContentFlaggingEnabled"] = strconv.FormatBool(c.FeatureFlags.ContentFlagging && *c.ContentFlaggingSettings.EnableContentFlagging)
+			props["EnableAutoTranslation"] = strconv.FormatBool(c.FeatureFlags.AutoTranslation && *c.AutoTranslationSettings.Enable)
+			if c.FeatureFlags.AutoTranslation {
+				props["AutoTranslationLanguages"] = strings.Join(*c.AutoTranslationSettings.TargetLanguages, ",")
+			} else {
+				props["AutoTranslationLanguages"] = ""
+			}
+			props["RestrictDMAndGMAutotranslation"] = strconv.FormatBool(*c.AutoTranslationSettings.RestrictDMAndGM)
+
+			if c.FeatureFlags.MobileEphemeralMode {
+				ephemeralEnabled := c.MobileEphemeralModeSettings.Enable != nil && *c.MobileEphemeralModeSettings.Enable
+				props["MobileEphemeralModeEnabled"] = strconv.FormatBool(ephemeralEnabled)
+				if c.MobileEphemeralModeSettings.DisconnectionTimeoutSeconds != nil {
+					props["MobileEphemeralModeDisconnectionTimeoutSeconds"] = strconv.Itoa(*c.MobileEphemeralModeSettings.DisconnectionTimeoutSeconds)
+				}
+				if c.MobileEphemeralModeSettings.OfflinePersistenceTimerHours != nil {
+					props["MobileEphemeralModeOfflinePersistenceTimerHours"] = strconv.Itoa(*c.MobileEphemeralModeSettings.OfflinePersistenceTimerHours)
+				}
+				if c.MobileEphemeralModeSettings.AutoCacheCleanupDays != nil {
+					props["MobileEphemeralModeAutoCacheCleanupDays"] = strconv.Itoa(*c.MobileEphemeralModeSettings.AutoCacheCleanupDays)
+				}
+			}
 		}
 	}
 
@@ -253,6 +291,7 @@ func GenerateLimitedClientConfig(c *model.Config, telemetryID string, license *m
 	props["BuildHashEnterprise"] = model.BuildHashEnterprise
 	props["BuildEnterpriseReady"] = model.BuildEnterpriseReady
 	props["ServiceEnvironment"] = model.GetServiceEnvironment()
+	props["IsFipsEnabled"] = strconv.FormatBool(fips.IsEnabled)
 
 	props["EnableBotAccountCreation"] = strconv.FormatBool(*c.ServiceSettings.EnableBotAccountCreation)
 	props["EnableDesktopLandingPage"] = strconv.FormatBool(*c.ServiceSettings.EnableDesktopLandingPage)
@@ -281,14 +320,6 @@ func GenerateLimitedClientConfig(c *model.Config, telemetryID string, license *m
 	props["EnableSignUpWithEmail"] = strconv.FormatBool(*c.EmailSettings.EnableSignUpWithEmail)
 	props["EnableSignInWithEmail"] = strconv.FormatBool(*c.EmailSettings.EnableSignInWithEmail)
 	props["EnableSignInWithUsername"] = strconv.FormatBool(*c.EmailSettings.EnableSignInWithUsername)
-
-	props["EmailLoginButtonColor"] = *c.EmailSettings.LoginButtonColor
-	props["EmailLoginButtonBorderColor"] = *c.EmailSettings.LoginButtonBorderColor
-	props["EmailLoginButtonTextColor"] = *c.EmailSettings.LoginButtonTextColor
-
-	props["EnableSignUpWithGitLab"] = strconv.FormatBool(*c.GitLabSettings.Enable)
-	props["GitLabButtonColor"] = *c.GitLabSettings.ButtonColor
-	props["GitLabButtonText"] = *c.GitLabSettings.ButtonText
 
 	props["TermsOfServiceLink"] = *c.SupportSettings.TermsOfServiceLink
 	props["PrivacyPolicyLink"] = *c.SupportSettings.PrivacyPolicyLink
@@ -333,14 +364,8 @@ func GenerateLimitedClientConfig(c *model.Config, telemetryID string, license *m
 	props["CustomDescriptionText"] = ""
 	props["EnableLdap"] = "false"
 	props["LdapLoginFieldName"] = ""
-	props["LdapLoginButtonColor"] = ""
-	props["LdapLoginButtonBorderColor"] = ""
-	props["LdapLoginButtonTextColor"] = ""
 	props["EnableSaml"] = "false"
 	props["SamlLoginButtonText"] = ""
-	props["SamlLoginButtonColor"] = ""
-	props["SamlLoginButtonBorderColor"] = ""
-	props["SamlLoginButtonTextColor"] = ""
 	props["EnableSignUpWithGoogle"] = "false"
 	props["EnableSignUpWithOffice365"] = "false"
 	props["EnableSignUpWithOpenId"] = "false"
@@ -355,22 +380,17 @@ func GenerateLimitedClientConfig(c *model.Config, telemetryID string, license *m
 	props["EnableGuestAccounts"] = strconv.FormatBool(*c.GuestAccountsSettings.Enable)
 	props["HideGuestTags"] = strconv.FormatBool(*c.GuestAccountsSettings.HideTags)
 	props["GuestAccountsEnforceMultifactorAuthentication"] = strconv.FormatBool(*c.GuestAccountsSettings.EnforceMultifactorAuthentication)
+	props["EnableGuestMagicLink"] = strconv.FormatBool(*c.GuestAccountsSettings.EnableGuestMagicLink)
 
 	if license != nil {
 		if *license.Features.LDAP {
 			props["EnableLdap"] = strconv.FormatBool(*c.LdapSettings.Enable)
 			props["LdapLoginFieldName"] = *c.LdapSettings.LoginFieldName
-			props["LdapLoginButtonColor"] = *c.LdapSettings.LoginButtonColor
-			props["LdapLoginButtonBorderColor"] = *c.LdapSettings.LoginButtonBorderColor
-			props["LdapLoginButtonTextColor"] = *c.LdapSettings.LoginButtonTextColor
 		}
 
 		if *license.Features.SAML {
 			props["EnableSaml"] = strconv.FormatBool(*c.SamlSettings.Enable)
 			props["SamlLoginButtonText"] = *c.SamlSettings.LoginButtonText
-			props["SamlLoginButtonColor"] = *c.SamlSettings.LoginButtonColor
-			props["SamlLoginButtonBorderColor"] = *c.SamlSettings.LoginButtonBorderColor
-			props["SamlLoginButtonTextColor"] = *c.SamlSettings.LoginButtonTextColor
 		}
 
 		if *license.Features.CustomTermsOfService {
@@ -400,12 +420,33 @@ func GenerateLimitedClientConfig(c *model.Config, telemetryID string, license *m
 			props["EnableSignUpWithOpenId"] = strconv.FormatBool(*c.OpenIdSettings.Enable)
 			props["OpenIdButtonColor"] = *c.OpenIdSettings.ButtonColor
 			props["OpenIdButtonText"] = *c.OpenIdSettings.ButtonText
+			props["EnableSignUpWithGitLab"] = strconv.FormatBool(*c.GitLabSettings.Enable)
+			props["GitLabButtonColor"] = *c.GitLabSettings.ButtonColor
+			props["GitLabButtonText"] = *c.GitLabSettings.ButtonText
 		}
 
-		if license.SkuShortName == model.LicenseShortSkuEnterprise {
+		if model.MinimumEnterpriseLicense(license) {
 			props["MobileEnableBiometrics"] = strconv.FormatBool(*c.NativeAppSettings.MobileEnableBiometrics)
 			props["MobilePreventScreenCapture"] = strconv.FormatBool(*c.NativeAppSettings.MobilePreventScreenCapture)
 			props["MobileJailbreakProtection"] = strconv.FormatBool(*c.NativeAppSettings.MobileJailbreakProtection)
+			props["ExperimentalEnableWatermark"] = strconv.FormatBool(*c.ExperimentalSettings.EnableWatermark)
+		}
+
+		if model.MinimumEnterpriseAdvancedLicense(license) {
+			// Check IntuneSettings configuration
+			intuneEnabled := (c.IntuneSettings.Enable != nil && *c.IntuneSettings.Enable && c.IntuneSettings.IsValid() == nil)
+
+			props["IntuneMAMEnabled"] = strconv.FormatBool(intuneEnabled)
+
+			if intuneEnabled {
+				// Use IntuneSettings for scope
+				props["IntuneScope"] = fmt.Sprintf("api://%s/login.mattermost", *c.IntuneSettings.ClientId)
+
+				// Expose AuthService if set
+				if c.IntuneSettings.AuthService != nil && *c.IntuneSettings.AuthService != "" {
+					props["IntuneAuthService"] = *c.IntuneSettings.AuthService
+				}
+			}
 		}
 	}
 

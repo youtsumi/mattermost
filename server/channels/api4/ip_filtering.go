@@ -10,7 +10,6 @@ import (
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/shared/mlog"
 	"github.com/mattermost/mattermost/server/v8/channels/app"
-	"github.com/mattermost/mattermost/server/v8/channels/audit"
 	"github.com/mattermost/mattermost/server/v8/einterfaces"
 )
 
@@ -22,8 +21,7 @@ func (api *API) InitIPFiltering() {
 
 func ensureIPFilteringInterface(c *Context, where string) (einterfaces.IPFilteringInterface, bool) {
 	license := c.App.License()
-	ipFilteringFeatureFlag := c.App.Config().FeatureFlags.CloudIPFiltering
-	if c.App.IPFiltering() == nil || !ipFilteringFeatureFlag || license == nil || !license.IsCloud() || !model.MinimumEnterpriseLicense(license) {
+	if c.App.IPFiltering() == nil || license == nil || !license.IsCloud() || !model.MinimumEnterpriseLicense(license) {
 		c.Err = model.NewAppError(where, "api.context.ip_filtering.not_available.app_error", nil, "", http.StatusNotImplemented)
 		return nil, false
 	}
@@ -64,7 +62,7 @@ func applyIPFilters(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auditRec := c.MakeAuditRecord("applyIPFilters", audit.Fail)
+	auditRec := c.MakeAuditRecord(model.AuditEventApplyIPFilters, model.AuditStatusFail)
 	defer c.LogAuditRecWithLevel(auditRec, app.LevelContent)
 
 	allowedRanges := &model.AllowedIPRanges{} // Initialize the allowedRanges variable
@@ -73,7 +71,7 @@ func applyIPFilters(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	audit.AddEventParameterAuditable(auditRec, "IPFilter", allowedRanges)
+	model.AddEventParameterAuditableToAuditRec(auditRec, "IPFilter", allowedRanges)
 
 	updatedAllowedRanges, err := ipFiltering.ApplyIPFilters(allowedRanges)
 

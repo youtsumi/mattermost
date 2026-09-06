@@ -35,7 +35,7 @@ func (c *FakeClusterInterface) IsLeader() bool { return false }
 
 func (c *FakeClusterInterface) GetMyClusterInfo() *model.ClusterInfo { return nil }
 
-func (c *FakeClusterInterface) GetClusterInfos() []*model.ClusterInfo { return nil }
+func (c *FakeClusterInterface) GetClusterInfos() ([]*model.ClusterInfo, error) { return nil, nil }
 
 func (c *FakeClusterInterface) SendClusterMessage(message *model.ClusterMessage) {
 	c.mut.Lock()
@@ -116,3 +116,5 @@ func (c *FakeClusterInterface) WebConnCountForUser(userID string) (int, *model.A
 func (c *FakeClusterInterface) GetWSQueues(userID, connectionID string, seqNum int64) (map[string]*model.WSQueues, error) {
 	return nil, nil
 }
+
+func (c *FakeClusterInterface) Shutdown() {}

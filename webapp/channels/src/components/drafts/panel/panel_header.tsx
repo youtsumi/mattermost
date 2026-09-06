@@ -1,16 +1,15 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import cn from 'classnames';
 import React, {useMemo} from 'react';
 import type {ComponentProps} from 'react';
 import {FormattedMessage} from 'react-intl';
 
 import {SyncIcon} from '@mattermost/compass-icons/components';
+import {WithTooltip} from '@mattermost/shared/components/tooltip';
 
 import Timestamp, {RelativeRanges} from 'components/timestamp';
 import Tag from 'components/widgets/tag/tag';
-import WithTooltip from 'components/with_tooltip';
 
 import './panel_header.scss';
 import {isToday} from 'utils/datetime';
@@ -33,32 +32,35 @@ export const scheduledPostTimeFormat: ComponentProps<typeof Timestamp>['useTime'
 type Props = {
     kind: 'draft' | 'scheduledPost';
     actions: React.ReactNode;
-    hover: boolean;
     timestamp: number;
     remote: boolean;
     title: React.ReactNode;
     error?: string;
+    repeatsWeekly?: boolean;
 };
 
 function PanelHeader({
     kind,
     actions,
-    hover,
     timestamp,
     remote,
     title,
     error,
+    repeatsWeekly,
 }: Props) {
     const timestampDateObject = useMemo(() => new Date(timestamp), [timestamp]);
 
     return (
-        <header className='PanelHeader'>
+        <div
+            className='PanelHeader'
+            data-testid='draft-panel-header'
+        >
             <div className='PanelHeader__left'>{title}</div>
             <div className='PanelHeader__right'>
-                <div className={cn('PanelHeader__actions', {show: hover})}>
+                <div className='PanelHeader__actions'>
                     {actions}
                 </div>
-                <div className={cn('PanelHeader__info', {hide: hover})}>
+                <div className='PanelHeader__info'>
                     {remote && (
                         <div className='PanelHeader__sync-icon'>
                             <WithTooltip
@@ -104,6 +106,18 @@ function PanelHeader({
                         }
                     </div>
 
+                    {kind === 'scheduledPost' && repeatsWeekly && !error && (
+                        <Tag
+                            variant={'info'}
+                            uppercase={false}
+                            text={(
+                                <FormattedMessage
+                                    id='scheduled_post.panel.header.repeats_weekly'
+                                    defaultMessage='Repeats weekly'
+                                />
+                            )}
+                        />
+                    )}
                     {kind === 'draft' && !error && (
                         <Tag
                             variant={'danger'}
@@ -121,7 +135,7 @@ function PanelHeader({
                     )}
                 </div>
             </div>
-        </header>
+        </div>
     );
 }
 

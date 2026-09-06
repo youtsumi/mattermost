@@ -25,8 +25,8 @@ import {closeModal} from 'actions/views/modals';
 import {makeGetCustomStatus, getRecentCustomStatuses, showStatusDropdownPulsatingDot, isCustomStatusExpired} from 'selectors/views/custom_status';
 
 import CustomStatusSuggestion from 'components/custom_status/custom_status_suggestion';
-import DateTimeInput, {getRoundedTime} from 'components/custom_status/date_time_input';
 import ExpiryMenu from 'components/custom_status/expiry_menu';
+import DateTimeInput, {getRoundedTime} from 'components/datetime_input/datetime_input';
 import RenderEmoji from 'components/emoji/render_emoji';
 import useEmojiPicker from 'components/emoji_picker/use_emoji_picker';
 import QuickInput, {MaxLengthInput} from 'components/quick_input';
@@ -111,7 +111,7 @@ const defaultCustomStatusSuggestions: DefaultUserCustomStatus[] = [
 
 const defaultDuration = TODAY;
 const CustomStatusModal: React.FC<Props> = (props: Props) => {
-    const getCustomStatus = useMemo(makeGetCustomStatus, []);
+    const getCustomStatus = useMemo(() => makeGetCustomStatus(), []);
     const dispatch = useDispatch();
     const currentCustomStatus = useSelector(getCustomStatus);
     const customStatusExpired = useSelector((state: GlobalState) => isCustomStatusExpired(state, currentCustomStatus));
@@ -367,7 +367,6 @@ const CustomStatusModal: React.FC<Props> = (props: Props) => {
             handleConfirm={handleSetStatus}
             handleEnterKeyPress={handleEnterKeyPressed}
             handleCancel={handleClearStatus}
-            confirmButtonClassName='btn btn-primary'
             ariaLabel={formatMessage({id: 'custom_status.set_status', defaultMessage: 'Set a status'})}
             keyboardEscape={false}
             tabIndex={-1}
@@ -413,9 +412,10 @@ const CustomStatusModal: React.FC<Props> = (props: Props) => {
                 {showDateAndTimeField && (
                     <DateTimeInput
                         time={customExpiryTime}
-                        handleChange={setCustomExpiryTime}
+                        handleChange={(date) => date && setCustomExpiryTime(date)}
                         timezone={timezone}
                         setIsInteracting={setIsInteracting}
+                        relativeDate={true}
                     />
                 )}
             </div>

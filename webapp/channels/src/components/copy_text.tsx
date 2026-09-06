@@ -5,7 +5,7 @@ import React, {useCallback} from 'react';
 import type {MessageDescriptor} from 'react-intl';
 import {useIntl} from 'react-intl';
 
-import WithTooltip from 'components/with_tooltip';
+import {WithTooltip} from '@mattermost/shared/components/tooltip';
 
 import {copyToClipboard} from 'utils/utils';
 
@@ -33,7 +33,7 @@ const CopyText = ({
         <WithTooltip title={label}>
             <button
                 data-testid='copyText'
-                className='btn btn-link fa fa-copy ml-2'
+                className='btn btn-link icon-content-copy ml-2'
                 aria-label={intl.formatMessage(label)}
                 onClick={copyText}
             />

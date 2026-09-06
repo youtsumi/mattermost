@@ -15,10 +15,8 @@ import (
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/shared/mlog"
 	"github.com/mattermost/mattermost/server/v8/channels/app"
-	"github.com/mattermost/mattermost/server/v8/channels/audit"
 	"github.com/mattermost/mattermost/server/v8/channels/store"
 	"github.com/mattermost/mattermost/server/v8/channels/web"
-	"github.com/mattermost/mattermost/server/v8/platform/services/telemetry"
 )
 
 func (api *API) InitGroup() {
@@ -76,6 +74,10 @@ func (api *API) InitGroup() {
 	// GET /api/v4/channels/:channel_id/groups
 	api.BaseRoutes.Channels.Handle("/{channel_id:[A-Za-z0-9]+}/groups",
 		api.APISessionRequired(getGroupsByChannel)).Methods(http.MethodGet)
+
+	// POST
+	api.BaseRoutes.Groups.Handle("/names",
+		api.APISessionRequired(getGroupsByNames)).Methods(http.MethodPost)
 
 	// GET /api/v4/teams/:team_id/groups
 	api.BaseRoutes.Teams.Handle("/{team_id:[A-Za-z0-9]+}/groups",
@@ -191,9 +193,9 @@ func createGroup(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auditRec := c.MakeAuditRecord("createGroup", audit.Fail)
+	auditRec := c.MakeAuditRecord(model.AuditEventCreateGroup, model.AuditStatusFail)
 	defer c.LogAuditRec(auditRec)
-	audit.AddEventParameterAuditable(auditRec, "group", group)
+	model.AddEventParameterAuditableToAuditRec(auditRec, "group", group)
 
 	newGroup, appErr := c.App.CreateGroupWithUserIds(group)
 	if appErr != nil {
@@ -261,9 +263,9 @@ func patchGroup(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auditRec := c.MakeAuditRecord("patchGroup", audit.Fail)
+	auditRec := c.MakeAuditRecord(model.AuditEventPatchGroup, model.AuditStatusFail)
 	defer c.LogAuditRec(auditRec)
-	audit.AddEventParameterAuditable(auditRec, "group", group)
+	model.AddEventParameterAuditableToAuditRec(auditRec, "group", group)
 
 	if groupPatch.AllowReference != nil && *groupPatch.AllowReference {
 		if groupPatch.Name == nil {
@@ -274,13 +276,13 @@ func patchGroup(c *Context, w http.ResponseWriter, r *http.Request) {
 				c.Err = model.NewAppError("Api4.patchGroup", "api.ldap_groups.existing_reserved_name_error", nil, "", http.StatusBadRequest)
 				return
 			}
-			//check if a user already has this group name
+			// check if a user already has this group name
 			user, _ := c.App.GetUserByUsername(*groupPatch.Name)
 			if user != nil {
 				c.Err = model.NewAppError("Api4.patchGroup", "api.ldap_groups.existing_user_name_error", nil, "", http.StatusBadRequest)
 				return
 			}
-			//check if a mentionable group already has this name
+			// check if a mentionable group already has this name
 			searchOpts := model.GroupSearchOpts{
 				FilterAllowReference: true,
 			}
@@ -301,14 +303,6 @@ func patchGroup(c *Context, w http.ResponseWriter, r *http.Request) {
 	}
 	auditRec.AddEventResultState(group)
 	auditRec.AddEventObjectType("group")
-
-	c.App.Srv().GetTelemetryService().SendTelemetryForFeature(
-		telemetry.TrackGroupsFeature,
-		"modify_group__edit_details",
-		map[string]any{
-			telemetry.TrackPropertyUser:  c.AppContext.Session().UserId,
-			telemetry.TrackPropertyGroup: group.Id,
-		})
 
 	b, err := json.Marshal(group)
 	if err != nil {
@@ -351,11 +345,11 @@ func linkGroupSyncable(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auditRec := c.MakeAuditRecord("linkGroupSyncable", audit.Fail)
+	auditRec := c.MakeAuditRecord(model.AuditEventLinkGroupSyncable, model.AuditStatusFail)
 	defer c.LogAuditRec(auditRec)
-	audit.AddEventParameter(auditRec, "group_id", c.Params.GroupId)
-	audit.AddEventParameter(auditRec, "syncable_id", syncableID)
-	audit.AddEventParameter(auditRec, "syncable_type", string(syncableType))
+	model.AddEventParameterToAuditRec(auditRec, "group_id", c.Params.GroupId)
+	model.AddEventParameterToAuditRec(auditRec, "syncable_id", syncableID)
+	model.AddEventParameterToAuditRec(auditRec, "syncable_type", string(syncableType))
 
 	var patch *model.GroupSyncablePatch
 	err = json.Unmarshal(body, &patch)
@@ -364,7 +358,7 @@ func linkGroupSyncable(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	audit.AddEventParameterAuditable(auditRec, "patch", patch)
+	model.AddEventParameterAuditableToAuditRec(auditRec, "patch", patch)
 
 	if !*c.App.Channels().License().Features.LDAPGroups {
 		c.Err = model.NewAppError("Api4.createGroupSyncable", "api.ldap_groups.license_error", nil, "", http.StatusForbidden)
@@ -378,10 +372,35 @@ func linkGroupSyncable(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	groupSyncable := &model.GroupSyncable{
-		GroupId:    c.Params.GroupId,
-		SyncableId: syncableID,
-		Type:       syncableType,
+	appErr = verifySchemeAdminAssignmentPermission(c, syncableType, syncableID, patch)
+	if appErr != nil {
+		appErr.Where = "Api4.linkGroupSyncable"
+		c.Err = appErr
+		return
+	}
+
+	// Upsert onto the existing row only when it is currently active so
+	// unspecified fields are preserved. A fresh link, or a re-link of a
+	// soft-deleted row, starts from a zero-value struct so that fields
+	// the caller did not (or was not authorized to) set are not carried
+	// over from the previous incarnation. The downstream upsert clears
+	// DeleteAt when re-activating.
+	existing, appErr := c.App.GetGroupSyncable(c.Params.GroupId, syncableID, syncableType)
+	if appErr != nil && appErr.StatusCode != http.StatusNotFound {
+		appErr.Where = "Api4.linkGroupSyncable"
+		c.Err = appErr
+		return
+	}
+
+	var groupSyncable *model.GroupSyncable
+	if existing != nil && existing.DeleteAt == 0 {
+		groupSyncable = existing
+	} else {
+		groupSyncable = &model.GroupSyncable{
+			GroupId:    c.Params.GroupId,
+			SyncableId: syncableID,
+			Type:       syncableType,
+		}
 	}
 	groupSyncable.Patch(patch)
 	groupSyncable, appErr = c.App.UpsertGroupSyncable(groupSyncable)
@@ -393,8 +412,9 @@ func linkGroupSyncable(c *Context, w http.ResponseWriter, r *http.Request) {
 	auditRec.AddEventResultState(groupSyncable)
 	auditRec.AddEventObjectType("group_syncable")
 
+	syncRoles := patch.SchemeAdmin != nil
 	c.App.Srv().Go(func() {
-		c.App.SyncRolesAndMembership(c.AppContext, syncableID, syncableType, c.Params.GroupId)
+		c.App.SyncRolesAndMembership(c.AppContext, syncableID, syncableType, c.Params.GroupId, syncRoles)
 	})
 
 	w.WriteHeader(http.StatusCreated)
@@ -533,11 +553,11 @@ func patchGroupSyncable(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auditRec := c.MakeAuditRecord("patchGroupSyncable", audit.Fail)
+	auditRec := c.MakeAuditRecord(model.AuditEventPatchGroupSyncable, model.AuditStatusFail)
 	defer c.LogAuditRec(auditRec)
-	audit.AddEventParameter(auditRec, "group_id", c.Params.GroupId)
-	audit.AddEventParameter(auditRec, "old_syncable_id", syncableID)
-	audit.AddEventParameter(auditRec, "old_syncable_type", string(syncableType))
+	model.AddEventParameterToAuditRec(auditRec, "group_id", c.Params.GroupId)
+	model.AddEventParameterToAuditRec(auditRec, "old_syncable_id", syncableID)
+	model.AddEventParameterToAuditRec(auditRec, "old_syncable_type", string(syncableType))
 
 	var patch *model.GroupSyncablePatch
 	err = json.Unmarshal(body, &patch)
@@ -546,7 +566,7 @@ func patchGroupSyncable(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	audit.AddEventParameterAuditable(auditRec, "patch", patch)
+	model.AddEventParameterAuditableToAuditRec(auditRec, "patch", patch)
 
 	if !*c.App.Channels().License().Features.LDAPGroups {
 		c.Err = model.NewAppError("Api4.patchGroupSyncable", "api.ldap_groups.license_error", nil, "",
@@ -555,6 +575,13 @@ func patchGroupSyncable(c *Context, w http.ResponseWriter, r *http.Request) {
 	}
 
 	appErr := verifyLinkUnlinkPermission(c, syncableType, syncableID)
+	if appErr != nil {
+		appErr.Where = "Api4.patchGroupSyncable"
+		c.Err = appErr
+		return
+	}
+
+	appErr = verifySchemeAdminAssignmentPermission(c, syncableType, syncableID, patch)
 	if appErr != nil {
 		appErr.Where = "Api4.patchGroupSyncable"
 		c.Err = appErr
@@ -578,8 +605,9 @@ func patchGroupSyncable(c *Context, w http.ResponseWriter, r *http.Request) {
 	auditRec.AddEventResultState(groupSyncable)
 	auditRec.AddEventObjectType("group_syncable")
 
+	syncRoles := patch.SchemeAdmin != nil
 	c.App.Srv().Go(func() {
-		c.App.SyncRolesAndMembership(c.AppContext, syncableID, syncableType, c.Params.GroupId)
+		c.App.SyncRolesAndMembership(c.AppContext, syncableID, syncableType, c.Params.GroupId, syncRoles)
 	})
 
 	b, err := json.Marshal(groupSyncable)
@@ -616,11 +644,11 @@ func unlinkGroupSyncable(c *Context, w http.ResponseWriter, r *http.Request) {
 	}
 	syncableType := c.Params.SyncableType
 
-	auditRec := c.MakeAuditRecord("unlinkGroupSyncable", audit.Fail)
+	auditRec := c.MakeAuditRecord(model.AuditEventUnlinkGroupSyncable, model.AuditStatusFail)
 	defer c.LogAuditRec(auditRec)
-	audit.AddEventParameter(auditRec, "group_id", c.Params.GroupId)
-	audit.AddEventParameter(auditRec, "syncable_id", syncableID)
-	audit.AddEventParameter(auditRec, "syncable_type", string(syncableType))
+	model.AddEventParameterToAuditRec(auditRec, "group_id", c.Params.GroupId)
+	model.AddEventParameterToAuditRec(auditRec, "syncable_id", syncableID)
+	model.AddEventParameterToAuditRec(auditRec, "syncable_type", string(syncableType))
 
 	if !*c.App.Channels().License().Features.LDAPGroups {
 		c.Err = model.NewAppError("Api4.unlinkGroupSyncable", "api.ldap_groups.license_error", nil, "", http.StatusForbidden)
@@ -703,8 +731,36 @@ func verifyLinkUnlinkPermission(c *Context, syncableType model.GroupSyncableType
 			permission = model.PermissionManagePublicChannelMembers
 		}
 
-		if !c.App.SessionHasPermissionToChannel(c.AppContext, *c.AppContext.Session(), syncableID, permission) {
+		if ok, _ := c.App.SessionHasPermissionToChannel(c.AppContext, *c.AppContext.Session(), syncableID, permission); !ok {
 			return model.MakePermissionError(c.AppContext.Session(), []*model.Permission{permission})
+		}
+	}
+
+	return nil
+}
+
+// verifySchemeAdminAssignmentPermission requires the caller to hold the
+// role-management permission for the target syncable
+// (manage_team_roles / manage_channel_roles), or the sysconsole groups
+// write permission, before an explicit SchemeAdmin value in the patch is
+// accepted. A nil patch.SchemeAdmin is a no-op.
+func verifySchemeAdminAssignmentPermission(c *Context, syncableType model.GroupSyncableType, syncableID string, patch *model.GroupSyncablePatch) *model.AppError {
+	if patch == nil || patch.SchemeAdmin == nil {
+		return nil
+	}
+
+	if c.App.SessionHasPermissionTo(*c.AppContext.Session(), model.PermissionSysconsoleWriteUserManagementGroups) {
+		return nil
+	}
+
+	switch syncableType {
+	case model.GroupSyncableTypeTeam:
+		if !c.App.SessionHasPermissionToTeam(*c.AppContext.Session(), syncableID, model.PermissionManageTeamRoles) {
+			return model.MakePermissionError(c.AppContext.Session(), []*model.Permission{model.PermissionManageTeamRoles})
+		}
+	case model.GroupSyncableTypeChannel:
+		if ok, _ := c.App.SessionHasPermissionToChannel(c.AppContext, *c.AppContext.Session(), syncableID, model.PermissionManageChannelRoles); !ok {
+			return model.MakePermissionError(c.AppContext.Session(), []*model.Permission{model.PermissionManageChannelRoles})
 		}
 	}
 
@@ -861,6 +917,47 @@ func getGroupsByChannel(c *Context, w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func getGroupsByNames(c *Context, w http.ResponseWriter, r *http.Request) {
+	permissionErr := requireLicense(c)
+	if permissionErr != nil {
+		c.Err = permissionErr
+		return
+	}
+
+	groupNames, err := model.SortedArrayFromJSON(r.Body)
+	if err != nil {
+		c.Err = model.NewAppError("getGroupsByNames", model.PayloadParseError, nil, "", http.StatusBadRequest).Wrap(err)
+		return
+	} else if len(groupNames) == 0 {
+		if _, err = w.Write([]byte("[]")); err != nil {
+			c.Logger.Warn("Error while writing response", mlog.Err(err))
+		}
+		return
+	}
+
+	filterAllowReference := !c.App.SessionHasPermissionTo(*c.AppContext.Session(), model.PermissionSysconsoleReadUserManagementGroups)
+
+	opts := model.GroupSearchOpts{
+		FilterAllowReference: filterAllowReference,
+	}
+
+	groups, appErr := c.App.GetGroupsByNames(groupNames, opts)
+	if appErr != nil {
+		c.Err = appErr
+		return
+	}
+
+	js, err := json.Marshal(groups)
+	if err != nil {
+		c.Err = model.NewAppError("getGroupsByNames", "api.marshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
+		return
+	}
+
+	if _, err := w.Write(js); err != nil {
+		c.Logger.Warn("Error while writing response", mlog.Err(err))
+	}
+}
+
 func getGroupsByTeam(c *Context, w http.ResponseWriter, r *http.Request) {
 	permissionErr := requireLicense(c)
 	if permissionErr != nil {
@@ -914,7 +1011,6 @@ func getGroupsByTeamCommon(c *Context, r *http.Request) ([]byte, *model.AppError
 		Groups: groups,
 		Count:  totalCount,
 	})
-
 	if err != nil {
 		return nil, model.NewAppError("Api4.getGroupsByTeam", "api.marshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
@@ -938,7 +1034,7 @@ func getGroupsByChannelCommon(c *Context, r *http.Request) ([]byte, *model.AppEr
 	} else {
 		permission = model.PermissionReadPublicChannelGroups
 	}
-	if !c.App.SessionHasPermissionToChannel(c.AppContext, *c.AppContext.Session(), c.Params.ChannelId, permission) {
+	if ok, _ := c.App.SessionHasPermissionToChannel(c.AppContext, *c.AppContext.Session(), c.Params.ChannelId, permission); !ok {
 		return nil, model.MakePermissionError(c.AppContext.Session(), []*model.Permission{permission})
 	}
 
@@ -1104,7 +1200,7 @@ func getGroups(c *Context, w http.ResponseWriter, r *http.Request) {
 		} else {
 			permission = model.PermissionManagePublicChannelMembers
 		}
-		if !c.App.SessionHasPermissionToChannel(c.AppContext, *c.AppContext.Session(), NotAssociatedToChannelID, permission) {
+		if ok, _ := c.App.SessionHasPermissionToChannel(c.AppContext, *c.AppContext.Session(), NotAssociatedToChannelID, permission); !ok {
 			c.SetPermissionError(permission)
 			return
 		}
@@ -1123,7 +1219,7 @@ func getGroups(c *Context, w http.ResponseWriter, r *http.Request) {
 		} else {
 			permission = model.PermissionManagePublicChannelMembers
 		}
-		if !c.App.SessionHasPermissionToChannel(c.AppContext, *c.AppContext.Session(), ChannelIDForMemberCount, permission) {
+		if ok, _ := c.App.SessionHasPermissionToChannel(c.AppContext, *c.AppContext.Session(), ChannelIDForMemberCount, permission); !ok {
 			c.SetPermissionError(permission)
 			return
 		}
@@ -1229,9 +1325,9 @@ func deleteGroup(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auditRec := c.MakeAuditRecord("deleteGroup", audit.Fail)
+	auditRec := c.MakeAuditRecord(model.AuditEventDeleteGroup, model.AuditStatusFail)
 	defer c.LogAuditRec(auditRec)
-	audit.AddEventParameter(auditRec, "group_id", c.Params.GroupId)
+	model.AddEventParameterToAuditRec(auditRec, "group_id", c.Params.GroupId)
 
 	group, err = c.App.DeleteGroup(c.Params.GroupId)
 	if err != nil {
@@ -1284,9 +1380,9 @@ func restoreGroup(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auditRec := c.MakeAuditRecord("restoreGroup", audit.Fail)
+	auditRec := c.MakeAuditRecord(model.AuditEventRestoreGroup, model.AuditStatusFail)
 	defer c.LogAuditRec(auditRec)
-	audit.AddEventParameter(auditRec, "group_id", c.Params.GroupId)
+	model.AddEventParameterToAuditRec(auditRec, "group_id", c.Params.GroupId)
 
 	restoredGroup, err := c.App.RestoreGroup(c.Params.GroupId)
 	if err != nil {
@@ -1346,9 +1442,16 @@ func addGroupMembers(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auditRec := c.MakeAuditRecord("addGroupMembers", audit.Fail)
+	for _, userID := range newMembers.UserIds {
+		if !model.IsValidId(userID) {
+			c.SetInvalidParamWithDetails("user_id", fmt.Sprintf("UserID %s is invalid", userID))
+			return
+		}
+	}
+
+	auditRec := c.MakeAuditRecord(model.AuditEventAddGroupMembers, model.AuditStatusFail)
 	defer c.LogAuditRec(auditRec)
-	audit.AddEventParameter(auditRec, "addGroupMembers_userids", newMembers.UserIds)
+	model.AddEventParameterToAuditRec(auditRec, "addGroupMembers_userids", newMembers.UserIds)
 
 	members, appErr := c.App.UpsertGroupMembers(c.Params.GroupId, newMembers.UserIds)
 	if appErr != nil {
@@ -1365,13 +1468,6 @@ func addGroupMembers(c *Context, w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write(b); err != nil {
 		c.Logger.Warn("Error while writing response", mlog.Err(err))
 	}
-	c.App.Srv().GetTelemetryService().SendTelemetryForFeature(
-		telemetry.TrackGroupsFeature,
-		"modify_group__add_members",
-		map[string]any{
-			telemetry.TrackPropertyUser:  c.AppContext.Session().UserId,
-			telemetry.TrackPropertyGroup: group.Id,
-		})
 }
 
 func deleteGroupMembers(c *Context, w http.ResponseWriter, r *http.Request) {
@@ -1414,9 +1510,16 @@ func deleteGroupMembers(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auditRec := c.MakeAuditRecord("deleteGroupMembers", audit.Fail)
+	for _, userID := range deleteBody.UserIds {
+		if !model.IsValidId(userID) {
+			c.SetInvalidParamWithDetails("user_id", fmt.Sprintf("UserID %s is invalid", userID))
+			return
+		}
+	}
+
+	auditRec := c.MakeAuditRecord(model.AuditEventDeleteGroupMembers, model.AuditStatusFail)
 	defer c.LogAuditRec(auditRec)
-	audit.AddEventParameter(auditRec, "deleteGroupMembers_userids", deleteBody.UserIds)
+	model.AddEventParameterToAuditRec(auditRec, "deleteGroupMembers_userids", deleteBody.UserIds)
 
 	members, appErr := c.App.DeleteGroupMembers(c.Params.GroupId, deleteBody.UserIds)
 	if appErr != nil {
@@ -1433,13 +1536,6 @@ func deleteGroupMembers(c *Context, w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write(b); err != nil {
 		c.Logger.Warn("Error while writing response", mlog.Err(err))
 	}
-	c.App.Srv().GetTelemetryService().SendTelemetryForFeature(
-		telemetry.TrackGroupsFeature,
-		"modify_group__remove_members",
-		map[string]any{
-			telemetry.TrackPropertyUser:  c.AppContext.Session().UserId,
-			telemetry.TrackPropertyGroup: group.Id,
-		})
 }
 
 // hasPermissionToReadGroupMembers check if a user has the permission to read the list of members of a given team.

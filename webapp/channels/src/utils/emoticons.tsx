@@ -4,7 +4,7 @@
 import {formatWithRenderer} from './markdown';
 import PlainRenderer from './markdown/plain_renderer';
 
-export const emoticonPatterns: { [key: string]: RegExp } = {
+export const emoticonPatterns: {[key: string]: RegExp} = {
     slightly_smiling_face: /(^|\B)(\\?:-?\))($|\B)/g, // :)
     wink: /(^|\B)(\\?;-?\))($|\B)/g, // ;)
     open_mouth: /(^|\B)(\\?:o)($|\b)/gi, // :o
@@ -25,7 +25,7 @@ export const emoticonPatterns: { [key: string]: RegExp } = {
     broken_heart: /(^|\B)(\\?<\/3|\\?&lt;\/3)($|\b)/g, // </3
 };
 
-export const EMOJI_PATTERN = /(:([a-zA-Z0-9_+-]+):)/g;
+export const EMOJI_PATTERN = /(?<!\w)(:([\w+-]+):)(?!\w)/g;
 
 export function matchEmoticons(text: string): string[] | null {
     const markdownCleanedText = formatWithRenderer(text, new PlainRenderer());
@@ -50,6 +50,7 @@ export function matchEmoticons(text: string): string[] | null {
 export function handleEmoticons(
     text: string,
     tokens: Map<string, {value: string; originalText: string}>,
+    renderEmoticonsAsEmoji = true,
 ): string {
     let output = text;
 
@@ -85,12 +86,14 @@ export function handleEmoticons(
     );
 
     // match text smilies like :D
-    for (const name of Object.keys(emoticonPatterns)) {
-        const pattern = emoticonPatterns[name];
+    if (renderEmoticonsAsEmoji) {
+        for (const name of Object.keys(emoticonPatterns)) {
+            const pattern = emoticonPatterns[name];
 
-        // this might look a bit funny, but since the name isn't contained in the actual match
-        // like with the named emoticons, we need to add it in manually
-        output = output.replace(pattern, (fullMatch, prefix, matchText) => replaceEmoticonWithToken(fullMatch, prefix, matchText, name));
+            // this might look a bit funny, but since the name isn't contained in the actual match
+            // like with the named emoticons, we need to add it in manually
+            output = output.replace(pattern, (fullMatch, prefix, matchText) => replaceEmoticonWithToken(fullMatch, prefix, matchText, name));
+        }
     }
 
     return output;

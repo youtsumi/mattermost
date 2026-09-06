@@ -117,26 +117,49 @@ func getBaseFileSrcStrings(mattermostDir string) ([]Translation, error) {
 	return translations, err
 }
 
-func extractSrcStrings(enterpriseDir, mattermostDir, modelDir, pluginDir, portalDir string) map[string]bool {
+// resolveSymlink resolves a path if it's a symlink, otherwise returns the original path
+func resolveSymlink(path string) string {
+	if realPath, err := filepath.EvalSymlinks(path); err == nil {
+		return realPath
+	}
+	return path
+}
+
+func extractSrcStrings(enterpriseDir, mattermostDir, modelDir, pluginDir, portalDir string) (map[string]bool, error) {
 	i18nStrings := map[string]bool{}
 	walkFunc := func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
 		if strings.HasPrefix(p, path.Join(mattermostDir, "vendor")) {
 			return nil
 		}
-		return extractFromPath(p, info, err, i18nStrings)
+		return extractFromPath(p, i18nStrings)
 	}
+
+	dirs := []string{mattermostDir, enterpriseDir, modelDir, pluginDir}
 	if portalDir != "" {
-		_ = filepath.Walk(portalDir, walkFunc)
-	} else {
-		_ = filepath.Walk(mattermostDir, walkFunc)
-		_ = filepath.Walk(enterpriseDir, walkFunc)
-		_ = filepath.Walk(modelDir, walkFunc)
-		_ = filepath.Walk(pluginDir, walkFunc)
+		dirs = []string{portalDir}
 	}
-	return i18nStrings
+
+	for _, dir := range dirs {
+		resolved := resolveSymlink(dir)
+
+		// Optional source trees, such as the enterprise repository, may not be checked
+		// out alongside the server. Skip them instead of failing the extraction.
+		if _, err := os.Stat(resolved); errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+
+		if err := filepath.Walk(resolved, walkFunc); err != nil {
+			return nil, fmt.Errorf("failed to walk %q: %w", dir, err)
+		}
+	}
+
+	return i18nStrings, nil
 }
 
-func extractCmdF(command *cobra.Command, args []string) error {
+func extractCmdF(command *cobra.Command, args []string) (err error) {
 	skipDynamic, err := command.Flags().GetBool("skip-dynamic")
 	if err != nil {
 		return errors.New("invalid skip-dynamic parameter")
@@ -173,7 +196,10 @@ func extractCmdF(command *cobra.Command, args []string) error {
 		skipDynamic = true // dynamics are not needed for portal
 		translationDir = portalDir
 	}
-	i18nStrings := extractSrcStrings(enterpriseDir, mattermostDir, modelDir, pluginDir, portalDir)
+	i18nStrings, err := extractSrcStrings(enterpriseDir, mattermostDir, modelDir, pluginDir, portalDir)
+	if err != nil {
+		return err
+	}
 	if !skipDynamic {
 		addDynamicallyGeneratedStrings(i18nStrings)
 	}
@@ -225,17 +251,17 @@ func extractCmdF(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 
 	encoder := json.NewEncoder(f)
 	encoder.SetIndent("", "  ")
 	encoder.SetEscapeHTML(false)
-	err = encoder.Encode(result)
-	if err != nil {
-		return err
-	}
 
-	return nil
+	return encoder.Encode(result)
 }
 
 func checkCmdF(command *cobra.Command, args []string) error {
@@ -271,7 +297,10 @@ func checkCmdF(command *cobra.Command, args []string) error {
 		translationDir = portalDir
 		skipDynamic = true // dynamics are not needed for portal
 	}
-	extractedSrcStrings := extractSrcStrings(enterpriseDir, mattermostDir, modelDir, pluginDir, portalDir)
+	extractedSrcStrings, err := extractSrcStrings(enterpriseDir, mattermostDir, modelDir, pluginDir, portalDir)
+	if err != nil {
+		return err
+	}
 	if !skipDynamic {
 		addDynamicallyGeneratedStrings(extractedSrcStrings)
 	}
@@ -374,6 +403,16 @@ func extractByFuncName(name string, args []ast.Expr) *string {
 			return nil
 		}
 		return &key.Value
+	} else if name == "TranslationId" {
+		if len(args) == 0 {
+			return nil
+		}
+
+		key, ok := args[0].(*ast.BasicLit)
+		if !ok {
+			return nil
+		}
+		return &key.Value
 	} else if name == "NewAppError" {
 		if len(args) < 2 {
 			return nil
@@ -448,26 +487,28 @@ func extractByFuncName(name string, args []ast.Expr) *string {
 
 func extractForConstants(name string, valueNode ast.Expr) *string {
 	validConstants := map[string]bool{
-		"MISSING_CHANNEL_ERROR":        true,
-		"MISSING_CHANNEL_MEMBER_ERROR": true,
-		"CHANNEL_EXISTS_ERROR":         true,
-		"MISSING_STATUS_ERROR":         true,
-		"TEAM_MEMBER_EXISTS_ERROR":     true,
-		"MISSING_AUTH_ACCOUNT_ERROR":   true,
-		"MISSING_ACCOUNT_ERROR":        true,
-		"EXPIRED_LICENSE_ERROR":        true,
-		"INVALID_LICENSE_ERROR":        true,
-		"MissingChannelError":          true,
-		"MissingChannelMemberError":    true,
-		"ChannelExistsError":           true,
-		"MissingStatusError":           true,
-		"TeamMemberExistsError":        true,
-		"MissingAuthAccountError":      true,
-		"MissingAccountError":          true,
-		"ExpiredLicenseError":          true,
-		"InvalidLicenseError":          true,
-		"NoTranslation":                true,
-		"PayloadParseError":            true,
+		"MISSING_CHANNEL_ERROR":                  true,
+		"MISSING_CHANNEL_MEMBER_ERROR":           true,
+		"CHANNEL_EXISTS_ERROR":                   true,
+		"MISSING_STATUS_ERROR":                   true,
+		"TEAM_MEMBER_EXISTS_ERROR":               true,
+		"MISSING_AUTH_ACCOUNT_ERROR":             true,
+		"MISSING_ACCOUNT_ERROR":                  true,
+		"EXPIRED_LICENSE_ERROR":                  true,
+		"INVALID_LICENSE_ERROR":                  true,
+		"MissingChannelError":                    true,
+		"MissingChannelMemberError":              true,
+		"ChannelExistsError":                     true,
+		"MissingStatusError":                     true,
+		"TeamMemberExistsError":                  true,
+		"MissingAuthAccountError":                true,
+		"MissingAccountError":                    true,
+		"ExpiredLicenseError":                    true,
+		"InvalidLicenseError":                    true,
+		"WrongEnvironmentProductionLicenseError": true,
+		"WrongEnvironmentTestLicenseError":       true,
+		"NoTranslation":                          true,
+		"PayloadParseError":                      true,
 	}
 
 	if _, ok := validConstants[name]; !ok {
@@ -482,7 +523,7 @@ func extractForConstants(name string, valueNode ast.Expr) *string {
 
 }
 
-func extractFromPath(path string, info os.FileInfo, err error, i18nStrings map[string]bool) error {
+func extractFromPath(path string, i18nStrings map[string]bool) error {
 	if strings.HasSuffix(path, "model/client4.go") {
 		return nil
 	}
@@ -498,7 +539,7 @@ func extractFromPath(path string, info os.FileInfo, err error, i18nStrings map[s
 
 	src, err := os.ReadFile(path)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("failed to read %q: %w", path, err)
 	}
 
 	fset := token.NewFileSet()
@@ -509,7 +550,7 @@ func extractFromPath(path string, info os.FileInfo, err error, i18nStrings map[s
 	}
 
 	ast.Inspect(f, func(n ast.Node) bool {
-		var id *string = nil
+		var id *string
 
 		switch expr := n.(type) {
 		case *ast.CallExpr:
@@ -519,14 +560,11 @@ func extractFromPath(path string, info os.FileInfo, err error, i18nStrings map[s
 				if id == nil {
 					return true
 				}
-				break
 			case *ast.Ident:
 				id = extractByFuncName(fun.Name, expr.Args)
-				break
 			default:
 				return true
 			}
-			break
 		case *ast.GenDecl:
 			if expr.Tok == token.CONST {
 				for _, spec := range expr.Specs {

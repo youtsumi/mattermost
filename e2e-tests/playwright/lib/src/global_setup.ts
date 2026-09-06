@@ -2,13 +2,13 @@
 // See LICENSE.txt for license information.
 
 import {Client4} from '@mattermost/client';
-import {UserProfile} from '@mattermost/types/users';
-import {PluginManifest} from '@mattermost/types/plugins';
-import {PreferenceType} from '@mattermost/types/preferences';
+import type {PluginManifest} from '@mattermost/types/plugins';
+import type {PreferenceType} from '@mattermost/types/preferences';
+import type {UserProfile} from '@mattermost/types/users';
 
-import {defaultTeam} from './util';
-import {createRandomTeam, getAdminClient, getDefaultAdminUser, makeClient} from './server';
+import {createNewTeam, getAdminClient, getDefaultAdminUser, makeClient} from './server';
 import {testConfig} from './test_config';
+import {defaultTeam} from './util';
 
 export async function baseGlobalSetup() {
     let adminClient: Client4;
@@ -23,6 +23,9 @@ export async function baseGlobalSetup() {
 
         ({client: adminClient, user: adminUser} = await makeClient(defaultAdmin));
     }
+
+    // Print playwright configs
+    printPlaywrightTestConfig();
 
     await sysadminSetup(adminClient, adminUser);
 }
@@ -42,7 +45,7 @@ async function sysadminSetup(client: Client4, user: UserProfile | null) {
     const myTeams = await client.getMyTeams();
     const myDefaultTeam = myTeams && myTeams.length > 0 && myTeams.find((team) => team.name === defaultTeam.name);
     if (!myDefaultTeam) {
-        await client.createTeam(createRandomTeam(defaultTeam.name, defaultTeam.displayName, 'O', false));
+        await createNewTeam(client, {name: defaultTeam.name, displayName: defaultTeam.displayName});
     } else if (myDefaultTeam && testConfig.resetBeforeTest) {
         await Promise.all(
             myTeams.filter((team) => team.name !== defaultTeam.name).map((team) => client.deleteTeam(team.id)),
@@ -69,6 +72,14 @@ async function sysadminSetup(client: Client4, user: UserProfile | null) {
     await printPluginDetails(client);
 }
 
+function printPlaywrightTestConfig() {
+    // eslint-disable-next-line no-console
+    console.log(`Playwright Test Config:
+  - Headless  = ${testConfig.headless}
+  - SlowMo    = ${testConfig.slowMo}
+  - Workers   = ${testConfig.workers}`);
+}
+
 async function printLicenseInfo(client: Client4) {
     const license = await client.getClientLicenseOld();
     // eslint-disable-next-line no-console
@@ -82,7 +93,7 @@ async function printLicenseInfo(client: Client4) {
 }
 
 async function printClientInfo(client: Client4) {
-    const config = await client.getClientConfigOld();
+    const config = await client.getClientConfig();
     // eslint-disable-next-line no-console
     console.log(`Build Info:
   - BuildNumber                 = ${config.BuildNumber}
@@ -94,7 +105,7 @@ async function printClientInfo(client: Client4) {
   - TelemetryId                 = ${config.TelemetryId}
   - ServiceEnvironment          = ${config.ServiceEnvironment}`);
 
-    const {LogSettings, ServiceSettings, FeatureFlags} = await client.getConfig();
+    const {LogSettings, ServiceSettings, PluginSettings, FeatureFlags} = await client.getConfig();
     // eslint-disable-next-line no-console
     console.log(`Notable Server Config:
   - ServiceSettings.EnableSecurityFixAlert  = ${ServiceSettings?.EnableSecurityFixAlert}
@@ -108,6 +119,12 @@ async function printClientInfo(client: Client4) {
             .map(([key, value]) => `  - ${key} = ${value}`)
             .join('\n'),
     );
+
+    // eslint-disable-next-line no-console
+    console.log(`Plugin Settings:
+  - Enable  = ${PluginSettings?.Enable}
+  - EnableUploads  = ${PluginSettings?.EnableUploads}
+  - AutomaticPrepackagedPlugins  = ${PluginSettings?.AutomaticPrepackagedPlugins}`);
 }
 
 async function printPluginDetails(client: Client4) {
@@ -146,6 +163,8 @@ async function savePreferences(client: Client4, userId: UserProfile['id']) {
         const preferences: PreferenceType[] = [
             {user_id: userId, category: 'tutorial_step', name: userId, value: '999'},
             {user_id: userId, category: 'crt_thread_pane_step', name: userId, value: '999'},
+            {user_id: userId, category: 'onboarding_task_list', name: 'onboarding_task_list_show', value: 'false'},
+            {user_id: userId, category: 'onboarding_task_list', name: 'onboarding_task_list_open', value: 'false'},
         ];
 
         await client.savePreferences(userId, preferences);

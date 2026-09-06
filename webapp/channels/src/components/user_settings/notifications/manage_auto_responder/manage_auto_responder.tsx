@@ -18,7 +18,7 @@ type Props = {
     submit: () => void;
     saving: boolean;
     error?: string;
-}
+};
 
 export default class ManageAutoResponder extends React.PureComponent<Props> {
     handleAutoResponderChecked = (e: ChangeEvent<HTMLInputElement>) => {
@@ -70,7 +70,7 @@ export default class ManageAutoResponder extends React.PureComponent<Props> {
             >
                 <div className='pt-2'>
                     <LocalizedPlaceholderTextarea
-                        style={{resize: 'none'}}
+                        style={{resize: 'none', height: 'auto'}}
                         id='autoResponderMessageInput'
                         className='form-control'
                         rows={5}

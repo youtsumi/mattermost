@@ -4,7 +4,7 @@
 import {combineReducers} from 'redux';
 
 import type {ClientLicense, ClientConfig} from '@mattermost/types/config';
-import type {UserPropertyField} from '@mattermost/types/properties';
+import type {UserPropertyField} from '@mattermost/types/properties_user';
 import type {IDMappedObjects} from '@mattermost/types/utilities';
 
 import type {MMReduxAction} from 'mattermost-redux/action_types';
@@ -100,6 +100,23 @@ function firstAdminCompleteSetup(state = false, action: MMReduxAction) {
     }
 }
 
+export type CWSAvailabilityState = 'pending' | 'available' | 'unavailable' | 'not_applicable';
+
+function cwsAvailability(state: CWSAvailabilityState = 'pending', action: MMReduxAction): CWSAvailabilityState {
+    switch (action.type) {
+    case GeneralTypes.CWS_AVAILABILITY_CHECK_REQUEST:
+        return 'pending';
+    case GeneralTypes.CWS_AVAILABILITY_CHECK_SUCCESS:
+        return action.data;
+    case GeneralTypes.CWS_AVAILABILITY_CHECK_FAILURE:
+        return 'unavailable';
+    case UserTypes.LOGOUT_SUCCESS:
+        return 'pending';
+    default:
+        return state;
+    }
+}
+
 export default combineReducers({
     config,
     license,
@@ -107,4 +124,5 @@ export default combineReducers({
     serverVersion,
     firstAdminVisitMarketplaceStatus,
     firstAdminCompleteSetup,
+    cwsAvailability,
 });

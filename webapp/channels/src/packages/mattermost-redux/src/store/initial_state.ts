@@ -7,6 +7,11 @@ import {zeroStateLimitedViews} from '../reducers/entities/posts';
 
 const state: GlobalState = {
     entities: {
+        agents: {
+            agents: [],
+            llmServices: [],
+            agentsStatus: {available: false},
+        },
         general: {
             config: {},
             license: {},
@@ -14,6 +19,7 @@ const state: GlobalState = {
             firstAdminVisitMarketplaceStatus: false,
             firstAdminCompleteSetup: false,
             customProfileAttributes: {},
+            cwsAvailability: 'pending',
         },
         users: {
             currentUserId: '',
@@ -23,7 +29,6 @@ const state: GlobalState = {
             profiles: {},
             profilesInTeam: {},
             profilesNotInTeam: {},
-            profilesWithoutTeam: new Set(),
             profilesInChannel: {},
             profilesNotInChannel: {},
             profilesInGroup: {},
@@ -49,6 +54,7 @@ const state: GlobalState = {
             stats: {},
             groupsAssociatedToTeam: {},
             totalCount: 0,
+            contentFlaggingStatus: {},
         },
         channels: {
             currentChannelId: '',
@@ -65,6 +71,13 @@ const state: GlobalState = {
             channelMemberCountsByGroup: {},
             messageCounts: {},
             channelsMemberCount: {},
+            restrictedDMs: {},
+            joinRequests: {
+                myPendingByChannel: {},
+                byChannel: {},
+                countsByChannel: {},
+                myList: [],
+            },
         },
         channelBookmarks: {
             byChannelId: {},
@@ -96,6 +109,12 @@ const state: GlobalState = {
             counts: {},
             countsIncludingDirect: {},
         },
+        recaps: {
+            byId: {},
+            allIds: [],
+            scheduledRecaps: {},
+            limitStatus: null,
+        },
         preferences: {
             myPreferences: {},
             userPreferences: {},
@@ -119,6 +138,8 @@ const state: GlobalState = {
             dataRetentionCustomPolicies: {},
             dataRetentionCustomPoliciesCount: 0,
             prevTrialLicense: {},
+            accessControlPolicies: {},
+            channelsForAccessControlPolicy: {},
         },
         jobs: {
             jobs: {},
@@ -134,12 +155,14 @@ const state: GlobalState = {
             appsBotIDs: [],
             appsOAuthAppIDs: [],
             dialogTriggerId: '',
+            dialogs: {},
             outgoingOAuthConnections: {},
         },
         files: {
             files: {},
             filesFromSearch: {},
             fileIdsByPostId: {},
+            rejectedFiles: new Set(),
         },
         emojis: {
             customEmoji: {},
@@ -173,6 +196,7 @@ const state: GlobalState = {
         channelCategories: {
             byId: {},
             orderByTeam: {},
+            managedCategoryMappings: {},
         },
         apps: {
             main: {
@@ -218,6 +242,17 @@ const state: GlobalState = {
             byTeamId: {},
             errorsByTeamId: {},
             byChannelOrThreadId: {},
+        },
+        contentFlagging: {},
+        properties: {
+            fields: {byObjectType: {}, byId: {}},
+            values: {byTargetId: {}, byFieldId: {}},
+            groups: {byId: {}, byName: {}},
+        },
+        renderPermissions: {
+            byResource: {},
+            invalidatedAt: 0,
+            invalidatedAtByResource: {},
         },
     },
     errors: [],

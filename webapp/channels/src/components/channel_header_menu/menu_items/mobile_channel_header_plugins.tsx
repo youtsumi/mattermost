@@ -24,7 +24,7 @@ import type {MobileChannelHeaderButtonAction} from 'types/store/plugins';
 type Props = {
     channel: Channel;
     isDropdown: boolean;
-}
+};
 
 const MobileChannelHeaderPlugins = (props: Props): JSX.Element => {
     const mobileComponents = useSelector(getChannelMobileHeaderPluginButtons);
@@ -75,6 +75,7 @@ const MobileChannelHeaderPlugins = (props: Props): JSX.Element => {
                     id={'mobileChannelHeaderItem' + plug.id}
                     onClick={handlePluginButtonClick}
                     labels={<span>{plug.dropdownText}</span>}
+                    leadingElement={plug.icon}
                 />
             );
         }

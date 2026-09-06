@@ -13,7 +13,7 @@ import type {Translations} from 'types/store/i18n';
 
 const pluginTranslationSources: Record<string, TranslationPluginFunction> = {};
 
-export type TranslationPluginFunction = (locale: string) => Translations
+export type TranslationPluginFunction = (locale: string) => Translations;
 
 export function registerPluginTranslationsSource(pluginId: string, sourceFunction: TranslationPluginFunction): ThunkActionFunc<void> {
     pluginTranslationSources[pluginId] = sourceFunction;
@@ -64,5 +64,12 @@ export function loadTranslations(locale: string, url: string): ActionFuncAsync {
             },
         });
         return {data: true};
+    };
+}
+
+export function setReadout(message: string) {
+    return {
+        type: ActionTypes.SET_READOUT,
+        data: message,
     };
 }

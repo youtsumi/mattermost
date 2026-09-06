@@ -15,10 +15,20 @@ import (
 
 type SqlProductNoticesStore struct {
 	*SqlStore
+
+	selectQuery sq.SelectBuilder
 }
 
 func newSqlProductNoticesStore(sqlStore *SqlStore) store.ProductNoticesStore {
-	return &SqlProductNoticesStore{sqlStore}
+	s := &SqlProductNoticesStore{
+		SqlStore: sqlStore,
+	}
+
+	s.selectQuery = s.getQueryBuilder().
+		Select("UserId", "NoticeId", "Viewed", "Timestamp").
+		From("ProductNoticeViewState")
+
+	return s
 }
 
 func (s SqlProductNoticesStore) Clear(notices []string) error {
@@ -50,22 +60,17 @@ func (s SqlProductNoticesStore) ClearOldNotices(currentNotices model.ProductNoti
 }
 
 func (s SqlProductNoticesStore) View(userId string, notices []string) (err error) {
-	transaction, err := s.GetMaster().Beginx()
+	transaction, err := s.GetMaster().Begin()
 	if err != nil {
 		return errors.Wrap(err, "begin_transaction")
 	}
 	defer finalizeTransactionX(transaction, &err)
 
 	noticeStates := []model.ProductNoticeViewState{}
-	sql, args, err := s.getQueryBuilder().
-		Select("*").
-		From("ProductNoticeViewState").
-		Where(sq.And{sq.Eq{"UserId": userId}, sq.Eq{"NoticeId": notices}}).
-		ToSql()
-	if err != nil {
-		return errors.Wrap(err, "View_ToSql")
-	}
-	if err := transaction.Select(&noticeStates, sql, args...); err != nil {
+	query := s.selectQuery.
+		Where(sq.Eq{"UserId": userId, "NoticeId": notices})
+
+	if err := transaction.SelectBuilder(&noticeStates, query); err != nil {
 		return errors.Wrapf(err, "failed to get ProductNoticeViewState with userId=%s", userId)
 	}
 
@@ -115,11 +120,9 @@ func (s SqlProductNoticesStore) View(userId string, notices []string) (err error
 
 func (s SqlProductNoticesStore) GetViews(userId string) ([]model.ProductNoticeViewState, error) {
 	noticeStates := []model.ProductNoticeViewState{}
-	sql, args, err := s.getQueryBuilder().Select("*").From("ProductNoticeViewState").Where(sq.Eq{"UserId": userId}).ToSql()
-	if err != nil {
-		return nil, errors.Wrap(err, "product_notice_view_state_tosql")
-	}
-	if err := s.GetReplica().Select(&noticeStates, sql, args...); err != nil {
+	query := s.selectQuery.Where(sq.Eq{"UserId": userId})
+
+	if err := s.GetReplica().SelectBuilder(&noticeStates, query); err != nil {
 		return nil, errors.Wrapf(err, "failed to get ProductNoticeViewState with userId=%s", userId)
 	}
 	return noticeStates, nil

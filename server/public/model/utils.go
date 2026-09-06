@@ -11,11 +11,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/mail"
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -78,13 +80,7 @@ func (sa StringArray) Remove(input string) StringArray {
 }
 
 func (sa StringArray) Contains(input string) bool {
-	for index := range sa {
-		if sa[index] == input {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(sa, input)
 }
 func (sa StringArray) Equals(input StringArray) bool {
 	if len(sa) != len(input) {
@@ -241,8 +237,14 @@ type AppError struct {
 	StatusCode      int    `json:"status_code,omitempty"` // The http status code
 	Where           string `json:"-"`                     // The function where it happened in the form of Struct.Func
 	SkipTranslation bool   `json:"-"`                     // Whether translation for the error should be skipped.
-	params          map[string]any
-	wrapped         error
+
+	// Props carries caller-authored context to API clients, like the Props fields on Users and
+	// Posts. Unlike DetailedError it is always returned to clients regardless of developer mode, so
+	// it must only hold flat strings that are safe for any client to see - never internal details.
+	Props StringMap `json:"props,omitempty"`
+
+	params  map[string]any
+	wrapped error
 }
 
 const maxErrorLength = 1024
@@ -410,6 +412,44 @@ func NewRandomString(length int) string {
 	return encoding.EncodeToString(data)[:length]
 }
 
+// NewTestPassword generates a password that meets complexity requirements
+// (uppercase, lowercase, number, special character) with a minimum length of 14.
+// The passwords are not cryptographically random. Use only in tests.
+func NewTestPassword() string {
+	const (
+		lowers   = LowercaseLetters
+		uppers   = UppercaseLetters
+		digits   = NUMBERS
+		specials = "!%^&*(),."
+		all      = lowers + uppers + digits + specials
+		minLen   = PasswordFIPSMinimumLength
+	)
+
+	// Read all randomness in one call for performance.
+	// We need minLen bytes for character selection + minLen bytes for shuffle indices.
+	entropy := make([]byte, 2*minLen)
+	if _, err := rand.Read(entropy); err != nil {
+		panic(err)
+	}
+
+	pw := make([]byte, minLen)
+	pw[0] = uppers[int(entropy[0])%len(uppers)]
+	pw[1] = lowers[int(entropy[1])%len(lowers)]
+	pw[2] = digits[int(entropy[2])%len(digits)]
+	pw[3] = specials[int(entropy[3])%len(specials)]
+	for i := 4; i < minLen; i++ {
+		pw[i] = all[int(entropy[i])%len(all)]
+	}
+
+	// Shuffle to avoid predictable prefix using remaining entropy.
+	for i := len(pw) - 1; i > 0; i-- {
+		j := int(entropy[minLen+i]) % (i + 1)
+		pw[i], pw[j] = pw[j], pw[i]
+	}
+
+	return string(pw)
+}
+
 // GetMillis is a convenience method to get milliseconds since epoch.
 func GetMillis() int64 {
 	return GetMillisForTime(time.Now())
@@ -453,9 +493,7 @@ func GetEndOfDayMillis(thisTime time.Time, timeZoneOffset int) int64 {
 
 func CopyStringMap(originalMap map[string]string) map[string]string {
 	copyMap := make(map[string]string, len(originalMap))
-	for k, v := range originalMap {
-		copyMap[k] = v
-	}
+	maps.Copy(copyMap, originalMap)
 	return copyMap
 }
 
@@ -698,13 +736,14 @@ func IsValidAlphaNumHyphenUnderscorePlus(s string) bool {
 }
 
 func Etag(parts ...any) string {
-	etag := CurrentVersion
+	var etag strings.Builder
+	etag.WriteString(CurrentVersion)
 
 	for _, part := range parts {
-		etag += fmt.Sprintf(".%v", part)
+		etag.WriteString(fmt.Sprintf(".%v", part))
 	}
 
-	return etag
+	return etag.String()
 }
 
 var (
@@ -717,8 +756,8 @@ var (
 func ParseHashtags(text string) (string, string) {
 	words := strings.Fields(text)
 
-	hashtagString := ""
-	plainString := ""
+	var hashtagStringSb strings.Builder
+	var plainString strings.Builder
 	for _, word := range words {
 		// trim off surrounding punctuation
 		word = puncStart.ReplaceAllString(word, "")
@@ -728,11 +767,12 @@ func ParseHashtags(text string) (string, string) {
 		word = hashtagStart.ReplaceAllString(word, "#")
 
 		if validHashtag.MatchString(word) {
-			hashtagString += " " + word
+			hashtagStringSb.WriteString(" " + word)
 		} else {
-			plainString += " " + word
+			plainString.WriteString(" " + word)
 		}
 	}
+	hashtagString := hashtagStringSb.String()
 
 	if len(hashtagString) > 1000 {
 		hashtagString = hashtagString[:999]
@@ -744,7 +784,7 @@ func ParseHashtags(text string) (string, string) {
 		}
 	}
 
-	return strings.TrimSpace(hashtagString), strings.TrimSpace(plainString)
+	return strings.TrimSpace(hashtagString), strings.TrimSpace(plainString.String())
 }
 
 func ClearMentionTags(post string) string {
@@ -881,4 +921,24 @@ func SliceToMapKey(s ...string) map[string]any {
 	}
 
 	return m
+}
+
+// LimitRunes limits the number of runes in a string to the given maximum.
+// It returns the potentially truncated string and a boolean indicating whether truncation occurred.
+func LimitRunes(s string, maxRunes int) (string, bool) {
+	runes := []rune(s)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes]), true
+	}
+
+	return s, false
+}
+
+// LimitBytes limits the number of bytes in a string to the given maximum.
+// It returns the potentially truncated string and a boolean indicating whether truncation occurred.
+func LimitBytes(s string, maxBytes int) (string, bool) {
+	if len(s) > maxBytes {
+		return s[:maxBytes], true
+	}
+	return s, false
 }

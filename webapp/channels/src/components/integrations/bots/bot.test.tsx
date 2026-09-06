@@ -1,14 +1,11 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import {shallow} from 'enzyme';
 import React from 'react';
-import {FormattedMessage} from 'react-intl';
 
 import {generateId} from 'mattermost-redux/utils/helpers';
 
-import Markdown from 'components/markdown';
-
+import {fireEvent, renderWithContext, screen} from 'tests/react_testing_utils';
 import {TestHelper as UtilsTestHelper} from 'utils/test_helper';
 
 import Bot from './bot';
@@ -24,10 +21,10 @@ describe('components/integrations/bots/Bot', () => {
         disableUserAccessToken: jest.fn(),
     };
 
-    it('regular bot', () => {
-        const bot = UtilsTestHelper.getBotMock({user_id: '1'});
+    it('plugin-managed bot shows the managing plugin id', () => {
+        const bot = UtilsTestHelper.getBotMock({user_id: '1', owner_id: 'com.mattermost.calls'});
         const user = UtilsTestHelper.getUserMock({id: bot.user_id});
-        const wrapper = shallow(
+        renderWithContext(
             <Bot
                 bot={bot}
                 user={user}
@@ -39,41 +36,62 @@ describe('components/integrations/bots/Bot', () => {
             />,
         );
 
-        expect(wrapper.contains(bot.display_name + ' (@' + bot.username + ')')).toEqual(true);
-        expect(wrapper.contains(<Markdown message={bot.description}/>)).toEqual(true);
-        expect(wrapper.contains('plugin')).toEqual(true);
+        expect(screen.getByText(/\(@\)/)).toBeInTheDocument();
+        expect(screen.getByText('Managed by plugin com.mattermost.calls')).toBeInTheDocument();
 
         // if bot managed by plugin, remove ability to edit from UI
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bot.manage.create_token'
-                defaultMessage='Create New Token'
+        expect(screen.queryByText('Create New Token')).not.toBeInTheDocument();
+        expect(screen.queryByText('Edit')).not.toBeInTheDocument();
+        expect(screen.queryByText(/^Disable$/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/^Enable$/)).not.toBeInTheDocument();
+    });
+
+    it('plugin-managed bot shows the managing plugin display name', () => {
+        const bot = UtilsTestHelper.getBotMock({user_id: '1', owner_id: 'com.mattermost.calls'});
+        const user = UtilsTestHelper.getUserMock({id: bot.user_id});
+        renderWithContext(
+            <Bot
+                bot={bot}
+                user={user}
+                owner={undefined}
+                pluginDisplayName='Calls'
+                accessTokens={{}}
+                team={team}
+                actions={actions}
+                fromApp={false}
             />,
-        )).toEqual(false);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bots.manage.edit'
-                defaultMessage='Edit'
+        );
+
+        expect(screen.getByText('Managed by Calls plugin')).toBeInTheDocument();
+        expect(screen.queryByText('Managed by plugin com.mattermost.calls')).not.toBeInTheDocument();
+    });
+
+    it('plugin-managed bot without a known plugin id falls back to a generic label', () => {
+        const bot = UtilsTestHelper.getBotMock({user_id: '1', owner_id: ''});
+        const user = UtilsTestHelper.getUserMock({id: bot.user_id});
+        renderWithContext(
+            <Bot
+                bot={bot}
+                user={user}
+                owner={undefined}
+                accessTokens={{}}
+                team={team}
+                actions={actions}
+                fromApp={false}
             />,
-        )).toEqual(false);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bot.manage.disable'
-                defaultMessage='Disable'
-            />,
-        )).toEqual(false);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bot.manage.enable'
-                defaultMessage='Enable'
-            />,
-        )).toEqual(false);
+        );
+
+        expect(screen.getByText('Managed by a plugin')).toBeInTheDocument();
+        expect(screen.queryByText('Create New Token')).not.toBeInTheDocument();
+        expect(screen.queryByText('Edit')).not.toBeInTheDocument();
+        expect(screen.queryByText(/^Disable$/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/^Enable$/)).not.toBeInTheDocument();
     });
 
     it('app bot', () => {
         const bot = UtilsTestHelper.getBotMock({user_id: '1'});
         const user = UtilsTestHelper.getUserMock({id: bot.user_id});
-        const wrapper = shallow(
+        renderWithContext(
             <Bot
                 bot={bot}
                 user={user}
@@ -85,42 +103,40 @@ describe('components/integrations/bots/Bot', () => {
             />,
         );
 
-        expect(wrapper.contains(bot.display_name + ' (@' + bot.username + ')')).toEqual(true);
-        expect(wrapper.contains(<Markdown message={bot.description}/>)).toEqual(true);
-        expect(wrapper.contains('Apps Framework')).toEqual(true);
+        expect(screen.getByText(/\(@\)/)).toBeInTheDocument();
+        expect(screen.getByText('Managed by Apps Framework')).toBeInTheDocument();
 
-        // if bot managed by plugin, remove ability to edit from UI
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bot.manage.create_token'
-                defaultMessage='Create New Token'
-            />,
-        )).toEqual(true);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bots.manage.edit'
-                defaultMessage='Edit'
-            />,
-        )).toEqual(true);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bot.manage.disable'
-                defaultMessage='Disable'
-            />,
-        )).toEqual(true);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bot.manage.enable'
-                defaultMessage='Enable'
-            />,
-        )).toEqual(false);
+        // if bot managed by app framework, ability to edit from UI is retained
+        expect(screen.getByText('Create New Token')).toBeInTheDocument();
+        expect(screen.getByText('Edit')).toBeInTheDocument();
+        expect(screen.getByText('Disable')).toBeInTheDocument();
+        expect(screen.queryByText(/^Enable$/)).not.toBeInTheDocument();
     });
 
-    it('disabled bot', () => {
-        const bot = UtilsTestHelper.getBotMock({user_id: '1'});
+    it('app bot takes precedence over a plugin owner id', () => {
+        const bot = UtilsTestHelper.getBotMock({user_id: '1', owner_id: 'com.mattermost.calls'});
+        const user = UtilsTestHelper.getUserMock({id: bot.user_id});
+        renderWithContext(
+            <Bot
+                bot={bot}
+                user={user}
+                owner={undefined}
+                accessTokens={{}}
+                team={team}
+                actions={actions}
+                fromApp={true}
+            />,
+        );
+
+        expect(screen.getByText('Managed by Apps Framework')).toBeInTheDocument();
+        expect(screen.queryByText(/Managed by plugin/)).not.toBeInTheDocument();
+    });
+
+    it('disabled plugin bot keeps the plugin id and only offers Enable', () => {
+        const bot = UtilsTestHelper.getBotMock({user_id: '1', owner_id: 'com.mattermost.calls'});
         bot.delete_at = 100; // disabled
         const user = UtilsTestHelper.getUserMock({id: bot.user_id});
-        const wrapper = shallow(
+        renderWithContext(
             <Bot
                 bot={bot}
                 user={user}
@@ -131,40 +147,19 @@ describe('components/integrations/bots/Bot', () => {
                 fromApp={false}
             />,
         );
-        expect(wrapper.contains(bot.display_name + ' (@' + bot.username + ')')).toEqual(true);
-        expect(wrapper.contains(<Markdown message={bot.description}/>)).toEqual(true);
-        expect(wrapper.contains('plugin')).toEqual(true);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bot.manage.create_token'
-                defaultMessage='Create New Token'
-            />,
-        )).toEqual(false);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bots.manage.edit'
-                defaultMessage='Edit'
-            />,
-        )).toEqual(false);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bot.manage.disable'
-                defaultMessage='Disable'
-            />,
-        )).toEqual(false);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bot.manage.enable'
-                defaultMessage='Enable'
-            />,
-        )).toEqual(true);
+        expect(screen.getByText(/\(@\)/)).toBeInTheDocument();
+        expect(screen.getByText('Managed by plugin com.mattermost.calls')).toBeInTheDocument();
+        expect(screen.queryByText('Create New Token')).not.toBeInTheDocument();
+        expect(screen.queryByText('Edit')).not.toBeInTheDocument();
+        expect(screen.queryByText(/^Disable$/)).not.toBeInTheDocument();
+        expect(screen.getByText('Enable')).toBeInTheDocument();
     });
 
     it('bot with owner', () => {
         const bot = UtilsTestHelper.getBotMock({user_id: '1', owner_id: '1'});
         const owner = UtilsTestHelper.getUserMock({id: bot.owner_id});
         const user = UtilsTestHelper.getUserMock({id: bot.user_id});
-        const wrapper = shallow(
+        renderWithContext(
             <Bot
                 bot={bot}
                 owner={owner}
@@ -175,28 +170,73 @@ describe('components/integrations/bots/Bot', () => {
                 fromApp={false}
             />,
         );
-        expect(wrapper.contains(owner.username)).toEqual(true);
-        expect(wrapper.contains('plugin')).toEqual(false);
+        expect(screen.getByText(`Managed by ${owner.username}`)).toBeInTheDocument();
+        expect(screen.queryByText(/plugin/)).not.toBeInTheDocument();
 
         // if bot is not managed by plugin, ability to edit from UI is retained
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bot.manage.create_token'
-                defaultMessage='Create New Token'
+        expect(screen.getByText('Create New Token')).toBeInTheDocument();
+        expect(screen.getByText('Edit')).toBeInTheDocument();
+        expect(screen.getByText('Disable')).toBeInTheDocument();
+    });
+
+    it.each(['system-bot', 'content-review'])('protected system bot %s hides Edit and Disable but keeps token management', (username) => {
+        const bot = UtilsTestHelper.getBotMock({user_id: '1', owner_id: '1', username, system_owned: true});
+        const owner = UtilsTestHelper.getUserMock({id: bot.owner_id});
+        const user = UtilsTestHelper.getUserMock({id: bot.user_id});
+        renderWithContext(
+            <Bot
+                bot={bot}
+                owner={owner}
+                user={user}
+                accessTokens={{}}
+                team={team}
+                actions={actions}
+                fromApp={false}
             />,
-        )).toEqual(true);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bots.manage.edit'
-                defaultMessage='Edit'
+        );
+
+        // Token management remains available for system-owned bots.
+        expect(screen.getByText('Create New Token')).toBeInTheDocument();
+
+        // Edit and Disable must be hidden so the bot cannot be disabled from the UI.
+        expect(screen.queryByText('Edit')).not.toBeInTheDocument();
+        expect(screen.queryByText(/^Disable$/)).not.toBeInTheDocument();
+
+        // An active bot should not offer Enable.
+        expect(screen.queryByText(/^Enable$/)).not.toBeInTheDocument();
+
+        // System-owned bots are surfaced as managed by Mattermost rather than by
+        // the system admin that happens to own them.
+        expect(screen.getByText('Managed by Mattermost')).toBeInTheDocument();
+        expect(screen.queryByText(`Managed by ${owner.username}`)).not.toBeInTheDocument();
+    });
+
+    it('disabled protected system bot still offers a working Enable control for recovery', () => {
+        const bot = UtilsTestHelper.getBotMock({user_id: 'protected-user-id', owner_id: '1', username: 'system-bot', system_owned: true});
+        bot.delete_at = 100; // disabled
+        const owner = UtilsTestHelper.getUserMock({id: bot.owner_id});
+        const user = UtilsTestHelper.getUserMock({id: bot.user_id});
+        renderWithContext(
+            <Bot
+                bot={bot}
+                owner={owner}
+                user={user}
+                accessTokens={{}}
+                team={team}
+                actions={actions}
+                fromApp={false}
             />,
-        )).toEqual(true);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='bot.manage.disable'
-                defaultMessage='Disable'
-            />,
-        )).toEqual(true);
+        );
+
+        // Protection must not remove the Enable control, otherwise a disabled
+        // protected bot could never be recovered from the UI.
+        const enableButton = screen.getByText('Enable');
+        expect(enableButton).toBeInTheDocument();
+        expect(screen.queryByText('Edit')).not.toBeInTheDocument();
+        expect(screen.queryByText(/^Disable$/)).not.toBeInTheDocument();
+
+        fireEvent.click(enableButton);
+        expect(actions.enableBot).toHaveBeenCalledWith('protected-user-id');
     });
 
     it('bot with access tokens', () => {
@@ -210,7 +250,7 @@ describe('components/integrations/bots/Bot', () => {
             }),
         };
 
-        const wrapper = shallow(
+        renderWithContext(
             <Bot
                 bot={bot}
                 owner={undefined}
@@ -222,19 +262,9 @@ describe('components/integrations/bots/Bot', () => {
             />,
         );
 
-        expect(wrapper.contains(tokenId)).toEqual(true);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='user.settings.tokens.deactivate'
-                defaultMessage='Disable'
-            />,
-        )).toEqual(true);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='user.settings.tokens.activate'
-                defaultMessage='Enable'
-            />,
-        )).toEqual(false);
+        expect(screen.getByText(tokenId)).toBeInTheDocument();
+        expect(screen.getByText(/^Disable$/)).toBeInTheDocument();
+        expect(screen.queryByText(/^Enable$/)).not.toBeInTheDocument();
     });
 
     it('bot with disabled access tokens', () => {
@@ -250,7 +280,7 @@ describe('components/integrations/bots/Bot', () => {
             }),
         };
 
-        const wrapper = shallow(
+        renderWithContext(
             <Bot
                 bot={bot}
                 owner={undefined}
@@ -262,18 +292,34 @@ describe('components/integrations/bots/Bot', () => {
             />,
         );
 
-        expect(wrapper.contains(tokenId)).toEqual(true);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='user.settings.tokens.deactivate'
-                defaultMessage='Disable'
+        expect(screen.getByText(tokenId)).toBeInTheDocument();
+        expect(screen.queryByText(/^Disable$/)).not.toBeInTheDocument();
+        expect(screen.getByText(/^Enable$/)).toBeInTheDocument();
+    });
+
+    it('shows a copy button for a newly created token secret', async () => {
+        const bot = UtilsTestHelper.getBotMock({user_id: '1', owner_id: '1'});
+        const owner = UtilsTestHelper.getUserMock({id: bot.owner_id});
+        const user = UtilsTestHelper.getUserMock({id: bot.user_id});
+        const createUserAccessToken = jest.fn().mockResolvedValue({data: {id: 'new-token-id', description: 'bot token', token: 'bot-secret'}});
+
+        renderWithContext(
+            <Bot
+                bot={bot}
+                owner={owner}
+                user={user}
+                accessTokens={{}}
+                team={team}
+                actions={{...actions, createUserAccessToken}}
+                fromApp={false}
             />,
-        )).toEqual(false);
-        expect(wrapper.contains(
-            <FormattedMessage
-                id='user.settings.tokens.activate'
-                defaultMessage='Enable'
-            />,
-        )).toEqual(true);
+        );
+
+        fireEvent.click(screen.getByText('Create New Token'));
+        fireEvent.change(screen.getByLabelText('Token Description:'), {target: {value: 'bot token'}});
+        fireEvent.click(screen.getByText('Save'));
+
+        expect(await screen.findByText(/bot-secret/)).toBeInTheDocument();
+        expect(screen.getByLabelText('Copy Token')).toBeInTheDocument();
     });
 });
